@@ -1,0 +1,13 @@
+.env
+.env.local
+.tmp/
+credentials.json
+token.json
+__pycache__/
+*.pyc
+.DS_Store
+output/
+input/
+node_modules/
+.next/
+*.pack.gz
