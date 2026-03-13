@@ -357,7 +357,7 @@ export default function Home() {
         ...data.map((d, i) => ({ ...d, file: toUpload[i] })),
       ]);
     } catch (err) {
-      setErrorMsg(err instanceof Error ? err.message : "Upload failed");
+      console.error("Upload failed:", err instanceof Error ? err.message : err);
     } finally {
       setUploading(false);
     }
