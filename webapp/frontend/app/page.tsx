@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useCallback, useEffect } from "react";
+import { useState, useRef, useEffect } from "react";
 import JSZip from "jszip";
 
 // ---------------------------------------------------------------------------
@@ -8,14 +8,6 @@ import JSZip from "jszip";
 // ---------------------------------------------------------------------------
 
 interface SessionImage {
-  id: string;
-  prompt: string;
-  image_url: string;
-  settings: { aspect_ratio: string; resolution: string; format: string };
-  timestamp: number;
-}
-
-interface GalleryImage {
   id: string;
   prompt: string;
   image_url: string;
@@ -47,15 +39,6 @@ const STAGE_LABELS: Record<GenerationStage, string> = {
   error: "Error",
 };
 
-const STAGE_COLORS: Record<GenerationStage, string> = {
-  idle: "",
-  submitting: "bg-yellow-100 text-yellow-800",
-  generating: "bg-blue-100 text-blue-800",
-  downloading: "bg-purple-100 text-purple-800",
-  done: "bg-green-100 text-green-800",
-  error: "bg-red-100 text-red-800",
-};
-
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
@@ -78,20 +61,6 @@ function parseBulkPrompts(text: string): string[] {
 // ---------------------------------------------------------------------------
 // Small components
 // ---------------------------------------------------------------------------
-
-function StatusBadge({ stage }: { stage: GenerationStage }) {
-  if (stage === "idle") return null;
-  return (
-    <span
-      className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium ${STAGE_COLORS[stage]}`}
-    >
-      {(stage === "submitting" || stage === "generating" || stage === "downloading") && (
-        <span className="inline-block h-2 w-2 rounded-full bg-current animate-pulse" />
-      )}
-      {STAGE_LABELS[stage]}
-    </span>
-  );
-}
 
 function ProcessingCard({ stage }: { stage?: GenerationStage }) {
   const label =
@@ -134,18 +103,8 @@ function ErrorCard({ onDismiss }: { onDismiss?: () => void }) {
         )}
       </div>
       <div className="aspect-square w-full bg-red-50 flex items-center justify-center">
-        <svg
-          className="h-10 w-10 text-red-200"
-          fill="none"
-          viewBox="0 0 24 24"
-          stroke="currentColor"
-          strokeWidth={1.5}
-        >
-          <path
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
-          />
+        <svg className="h-10 w-10 text-red-200" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
         </svg>
       </div>
       <div className="p-3">
@@ -155,29 +114,17 @@ function ErrorCard({ onDismiss }: { onDismiss?: () => void }) {
   );
 }
 
-function SkeletonCard() {
-  return (
-    <div className="rounded-xl overflow-hidden bg-white shadow-sm border border-gray-100 animate-pulse">
-      <div className="px-3 pt-3 pb-1">
-        <div className="h-5 w-20 rounded-full bg-gray-100" />
-      </div>
-      <div className="skeleton aspect-square w-full" />
-      <div className="p-3">
-        <div className="h-9 rounded-lg bg-gray-100" />
-      </div>
-    </div>
-  );
-}
-
 function ImageCard({
   image,
   onDelete,
   onPreview,
+  onDownload,
   isNew,
 }: {
-  image: SessionImage | GalleryImage;
+  image: SessionImage;
   onDelete?: (id: string) => void;
   onPreview?: (url: string, format: string) => void;
+  onDownload?: (url: string, format: string) => void;
   isNew?: boolean;
 }) {
   return (
@@ -213,14 +160,12 @@ function ImageCard({
         )}
       </div>
       <div className="p-3">
-        <a
-          href={image.image_url}
-          download
-          onClick={(e) => e.stopPropagation()}
+        <button
+          onClick={() => onDownload?.(image.image_url, image.settings.format)}
           className="block w-full text-center bg-green-600 hover:bg-green-700 text-white text-sm font-semibold py-2 rounded-lg transition-colors cursor-pointer"
         >
           Download {image.settings.format.toUpperCase()}
-        </a>
+        </button>
       </div>
     </div>
   );
@@ -247,68 +192,26 @@ export default function Home() {
 
   // Generation state
   const [bulkTasks, setBulkTasks] = useState<BulkTask[]>([]);
-  const bulkEventSourcesRef = useRef<Map<string, EventSource>>(new Map());
+  const pollIntervalsRef = useRef<Map<string, ReturnType<typeof setInterval>>>(new Map());
 
   // Images
   const [sessionImages, setSessionImages] = useState<SessionImage[]>([]);
-  const [galleryImages, setGalleryImages] = useState<GalleryImage[]>([]);
-  const [galleryLoading, setGalleryLoading] = useState(false);
   const [newestId, setNewestId] = useState<string | null>(null);
   const [previewImage, setPreviewImage] = useState<{ url: string; format: string } | null>(null);
 
-  // Tab
-  const [tab, setTab] = useState<"recent" | "gallery">("recent");
-
-  // Track whether gallery has been loaded once
-  const galleryLoaded = useRef(false);
-
-  // Fetch gallery
-  const fetchGallery = useCallback(async () => {
-    setGalleryLoading(true);
-    try {
-      const res = await fetch("/api/gallery");
-      if (!res.ok) throw new Error("Failed to load gallery");
-      const data = await res.json();
-      const images: GalleryImage[] = (data.images ?? data ?? []).map(
-        (img: Record<string, unknown>) => ({
-          id: img.id ?? img.filename ?? String(Math.random()),
-          prompt: img.prompt ?? "",
-          image_url: img.image_url ?? img.url ?? "",
-          settings: img.settings ?? {
-            aspect_ratio: "1:1",
-            resolution: "2K",
-            format: "png",
-          },
-          timestamp: img.timestamp ?? Date.now(),
-        })
-      );
-      setGalleryImages(images);
-      galleryLoaded.current = true;
-    } catch {
-      // silently fail — gallery may not exist yet
-    } finally {
-      setGalleryLoading(false);
-    }
-  }, []);
-
-  // Switch tabs
-  useEffect(() => {
-    if (tab === "gallery" && !galleryLoaded.current) {
-      fetchGallery();
-    }
-  }, [tab, fetchGallery]);
-
-  // Cleanup SSE on unmount
+  // Cleanup polling intervals on unmount
   useEffect(() => {
     return () => {
-      bulkEventSourcesRef.current.forEach((es) => es.close());
-      bulkEventSourcesRef.current.clear();
+      pollIntervalsRef.current.forEach((interval) => clearInterval(interval));
+      pollIntervalsRef.current.clear();
     };
   }, []);
 
   // Close lightbox on Esc
   useEffect(() => {
-    const handler = (e: KeyboardEvent) => { if (e.key === "Escape") setPreviewImage(null); };
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setPreviewImage(null);
+    };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
   }, []);
@@ -320,17 +223,10 @@ export default function Home() {
     return () => clearTimeout(t);
   }, [newestId]);
 
-  // Delete gallery image
-  const deleteGalleryImage = async (id: string) => {
-    try {
-      await fetch(`/api/gallery/${id}`, { method: "DELETE" });
-      setGalleryImages((prev) => prev.filter((img) => img.id !== id));
-    } catch {
-      // ignore
-    }
-  };
+  // ---------------------------------------------------------------------------
+  // Upload
+  // ---------------------------------------------------------------------------
 
-  // Upload images
   const handleUploadFiles = async (files: FileList | File[]) => {
     const fileArray = Array.from(files);
     const remaining = 14 - uploadedImages.length;
@@ -342,11 +238,7 @@ export default function Home() {
       const formData = new FormData();
       toUpload.forEach((f) => formData.append("files", f));
 
-      // Upload via Next.js proxy
-      const res = await fetch("/api/upload", {
-        method: "POST",
-        body: formData,
-      });
+      const res = await fetch("/api/upload", { method: "POST", body: formData });
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
         throw new Error(err.detail ?? "Upload failed");
@@ -370,131 +262,159 @@ export default function Home() {
   const handleDrop = (e: React.DragEvent) => {
     e.preventDefault();
     setDragOver(false);
-    if (e.dataTransfer.files.length > 0) {
-      handleUploadFiles(e.dataTransfer.files);
-    }
+    if (e.dataTransfer.files.length > 0) handleUploadFiles(e.dataTransfer.files);
   };
 
-  // Generate (1 or more prompts)
+  // ---------------------------------------------------------------------------
+  // Generate
+  // ---------------------------------------------------------------------------
+
   const handleBulkGenerate = async () => {
     const prompts = parseBulkPrompts(promptText);
     if (prompts.length === 0) return;
 
+    // Create placeholder IDs upfront so UI updates immediately
+    const placeholderIds = prompts.map(() => crypto.randomUUID());
+    const newTasks: BulkTask[] = placeholderIds.map((id, i) => ({
+      taskId: id,
+      prompt: prompts[i],
+      stage: "submitting" as GenerationStage,
+    }));
+    setBulkTasks((prev) => [...prev, ...newTasks]);
+
+    let tasks: { index: number; prompt: string; kieTaskId: string | null; error?: string }[] = [];
     try {
-      const res = await fetch("/api/bulk-generate", {
+      const res = await fetch("/api/create-tasks", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           prompts,
-          aspect_ratio: aspectRatio,
+          aspectRatio,
           resolution,
-          output_format: format,
-          image_input: uploadedImages.map((img) => img.url),
+          outputFormat: format,
+          imageUrls: uploadedImages.map((img) => img.url),
         }),
       });
-
       if (!res.ok) {
         const errData = await res.json().catch(() => ({}));
-        throw new Error(errData.detail ?? "Bulk generation failed");
+        throw new Error(errData.detail ?? "Failed to create tasks");
+      }
+      const data = await res.json();
+      tasks = data.tasks;
+    } catch (err) {
+      // Mark all placeholders as error
+      const msg = err instanceof Error ? err.message : "Failed";
+      setBulkTasks((prev) =>
+        prev.map((t) =>
+          placeholderIds.includes(t.taskId)
+            ? { ...t, stage: "error" as GenerationStage, errorMsg: msg }
+            : t
+        )
+      );
+      return;
+    }
+
+    // Start polling for each task
+    tasks.forEach(({ index, prompt: taskPrompt, kieTaskId, error }) => {
+      const placeholderId = placeholderIds[index];
+
+      if (!kieTaskId || error) {
+        setBulkTasks((prev) =>
+          prev.map((t) =>
+            t.taskId === placeholderId
+              ? { ...t, stage: "error" as GenerationStage, errorMsg: error ?? "Failed to queue" }
+              : t
+          )
+        );
+        return;
       }
 
-      const data = await res.json();
-      const taskIds: string[] = data.task_ids;
+      setBulkTasks((prev) =>
+        prev.map((t) =>
+          t.taskId === placeholderId ? { ...t, stage: "generating" as GenerationStage } : t
+        )
+      );
 
-      // Add all tasks to in-progress list
-      const newTasks: BulkTask[] = taskIds.map((taskId, i) => ({
-        taskId,
-        prompt: prompts[i],
-        stage: "submitting" as GenerationStage,
-      }));
-      setBulkTasks((prev) => [...prev, ...newTasks]);
+      const interval = setInterval(async () => {
+        try {
+          const pollRes = await fetch(`/api/poll-task?kieTaskId=${kieTaskId}`);
+          const pollData = await pollRes.json();
 
-      // Open one SSE connection per task
-      taskIds.forEach((taskId, i) => {
-        const taskPrompt = prompts[i];
-        const es = new EventSource(`/api/status/${taskId}`);
-        bulkEventSourcesRef.current.set(taskId, es);
-
-        const handleEvent = (event: MessageEvent) => {
-          try {
-            const msg = JSON.parse(event.data);
-            const s = (msg.stage ?? "").toLowerCase();
-
-            if (s === "completed") {
-              es.close();
-              bulkEventSourcesRef.current.delete(taskId);
-
-              // Move from processing → session images
-              setBulkTasks((prev) => prev.filter((t) => t.taskId !== taskId));
-              const newImage: SessionImage = {
-                id: taskId,
-                prompt: taskPrompt,
-                image_url: msg.image_url,
-                settings: { aspect_ratio: aspectRatio, resolution, format },
-                timestamp: Date.now(),
-              };
-              setSessionImages((prev) => [newImage, ...prev]);
-              setNewestId(taskId);
-            } else if (s === "failed") {
-              es.close();
-              bulkEventSourcesRef.current.delete(taskId);
-              setBulkTasks((prev) =>
-                prev.map((t) =>
-                  t.taskId === taskId
-                    ? {
-                        ...t,
-                        stage: "error" as GenerationStage,
-                        errorMsg: msg.message ?? "Generation failed",
-                      }
-                    : t
-                )
-              );
-            } else {
-              const newStage: GenerationStage =
-                s === "polling"
-                  ? "generating"
-                  : s === "downloading"
-                  ? "downloading"
-                  : "submitting";
-              setBulkTasks((prev) =>
-                prev.map((t) => (t.taskId === taskId ? { ...t, stage: newStage } : t))
-              );
-            }
-          } catch {
-            // ignore malformed
+          if (pollData.state === "success") {
+            clearInterval(interval);
+            pollIntervalsRef.current.delete(placeholderId);
+            setBulkTasks((prev) => prev.filter((t) => t.taskId !== placeholderId));
+            const newImage: SessionImage = {
+              id: placeholderId,
+              prompt: taskPrompt,
+              image_url: pollData.imageUrl,
+              settings: { aspect_ratio: aspectRatio, resolution, format },
+              timestamp: Date.now(),
+            };
+            setSessionImages((prev) => [newImage, ...prev]);
+            setNewestId(placeholderId);
+          } else if (pollData.state === "failed") {
+            clearInterval(interval);
+            pollIntervalsRef.current.delete(placeholderId);
+            setBulkTasks((prev) =>
+              prev.map((t) =>
+                t.taskId === placeholderId
+                  ? { ...t, stage: "error" as GenerationStage, errorMsg: "Generation failed" }
+                  : t
+              )
+            );
           }
-        };
-
-        es.addEventListener("status", handleEvent);
-        es.onmessage = handleEvent;
-        es.onerror = () => {
-          es.close();
-          bulkEventSourcesRef.current.delete(taskId);
+        } catch {
+          clearInterval(interval);
+          pollIntervalsRef.current.delete(placeholderId);
           setBulkTasks((prev) =>
             prev.map((t) =>
-              t.taskId === taskId
+              t.taskId === placeholderId
                 ? { ...t, stage: "error" as GenerationStage, errorMsg: "Lost connection" }
                 : t
             )
           );
-        };
-      });
-    } catch (err) {
-      setErrorMsg(err instanceof Error ? err.message : "Bulk generation failed");
-    }
+        }
+      }, 2500);
+
+      pollIntervalsRef.current.set(placeholderId, interval);
+    });
   };
 
   const dismissBulkTask = (taskId: string) => {
-    bulkEventSourcesRef.current.get(taskId)?.close();
-    bulkEventSourcesRef.current.delete(taskId);
+    const interval = pollIntervalsRef.current.get(taskId);
+    if (interval) {
+      clearInterval(interval);
+      pollIntervalsRef.current.delete(taskId);
+    }
     setBulkTasks((prev) => prev.filter((t) => t.taskId !== taskId));
   };
 
-  const downloadAsZip = async (images: SessionImage[] | GalleryImage[], zipName: string) => {
+  // ---------------------------------------------------------------------------
+  // Download
+  // ---------------------------------------------------------------------------
+
+  const downloadSingle = async (url: string, fmt: string) => {
+    try {
+      const res = await fetch(`/api/proxy-image?url=${encodeURIComponent(url)}`);
+      const blob = await res.blob();
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = `ad.${fmt}`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(a.href);
+    } catch {
+      window.open(url, "_blank");
+    }
+  };
+
+  const downloadAsZip = async (images: SessionImage[], zipName: string) => {
     const zip = new JSZip();
     await Promise.all(
       images.map(async (img, i) => {
-        const res = await fetch(img.image_url);
+        const res = await fetch(`/api/proxy-image?url=${encodeURIComponent(img.image_url)}`);
         const blob = await res.blob();
         zip.file(`image-${String(i + 1).padStart(2, "0")}.${img.settings.format}`, blob);
       })
@@ -508,8 +428,6 @@ export default function Home() {
     document.body.removeChild(a);
     URL.revokeObjectURL(a.href);
   };
-
-  const handleDownloadAll = () => downloadAsZip(sessionImages, "recent-ads.zip");
 
   const parsedPrompts = parseBulkPrompts(promptText);
   const activeBulkCount = bulkTasks.filter((t) => t.stage !== "error").length;
@@ -577,19 +495,12 @@ export default function Home() {
 
             {/* Drop zone */}
             <div
-              onDragOver={(e) => {
-                e.preventDefault();
-                setDragOver(true);
-              }}
+              onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
               onDragLeave={() => setDragOver(false)}
               onDrop={handleDrop}
               onClick={() => fileInputRef.current?.click()}
               className={`relative rounded-lg border-2 border-dashed transition-colors cursor-pointer
-                ${
-                  dragOver
-                    ? "border-black bg-gray-100"
-                    : "border-gray-200 bg-gray-50 hover:border-gray-300"
-                }
+                ${dragOver ? "border-black bg-gray-100" : "border-gray-200 bg-gray-50 hover:border-gray-300"}
                 ${uploadedImages.length > 0 ? "p-3" : "p-6"}
               `}
             >
@@ -607,18 +518,8 @@ export default function Home() {
 
               {uploadedImages.length === 0 ? (
                 <div className="flex flex-col items-center text-gray-400">
-                  <svg
-                    className="h-8 w-8 mb-2"
-                    fill="none"
-                    viewBox="0 0 24 24"
-                    stroke="currentColor"
-                    strokeWidth={1.5}
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      d="M2.25 15.75l5.159-5.159a2.25 2.25 0 013.182 0l5.159 5.159m-1.5-1.5l1.409-1.409a2.25 2.25 0 013.182 0l2.909 2.909M3.75 21h16.5A2.25 2.25 0 0022.5 18.75V5.25A2.25 2.25 0 0020.25 3H3.75A2.25 2.25 0 001.5 5.25v13.5A2.25 2.25 0 003.75 21z"
-                    />
+                  <svg className="h-8 w-8 mb-2" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 15.75l5.159-5.159a2.25 2.25 0 013.182 0l5.159 5.159m-1.5-1.5l1.409-1.409a2.25 2.25 0 013.182 0l2.909 2.909M3.75 21h16.5A2.25 2.25 0 0022.5 18.75V5.25A2.25 2.25 0 0020.25 3H3.75A2.25 2.25 0 001.5 5.25v13.5A2.25 2.25 0 003.75 21z" />
                   </svg>
                   <p className="text-xs">Click to upload or drag and drop</p>
                   <p className="text-[10px] mt-0.5 text-gray-300">
@@ -632,11 +533,7 @@ export default function Home() {
                       key={img.filename}
                       className="relative group rounded-lg overflow-hidden aspect-square bg-gray-100"
                     >
-                      <img
-                        src={img.url}
-                        alt="Reference"
-                        className="w-full h-full object-cover"
-                      />
+                      <img src={img.url} alt="Reference" className="w-full h-full object-cover" />
                       <button
                         onClick={(e) => {
                           e.stopPropagation();
@@ -650,18 +547,8 @@ export default function Home() {
                   ))}
                   {uploadedImages.length < 14 && (
                     <div className="flex items-center justify-center aspect-square rounded-lg border border-dashed border-gray-200 text-gray-300 hover:border-gray-400 hover:text-gray-400 transition-colors">
-                      <svg
-                        className="h-5 w-5"
-                        fill="none"
-                        viewBox="0 0 24 24"
-                        stroke="currentColor"
-                        strokeWidth={2}
-                      >
-                        <path
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          d="M12 4.5v15m7.5-7.5h-15"
-                        />
+                      <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
                       </svg>
                     </div>
                   )}
@@ -670,24 +557,9 @@ export default function Home() {
 
               {uploading && (
                 <div className="absolute inset-0 bg-white/70 flex items-center justify-center rounded-lg">
-                  <svg
-                    className="animate-spin h-5 w-5 text-gray-500"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                  >
-                    <circle
-                      className="opacity-25"
-                      cx="12"
-                      cy="12"
-                      r="10"
-                      stroke="currentColor"
-                      strokeWidth="3"
-                    />
-                    <path
-                      className="opacity-75"
-                      fill="currentColor"
-                      d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"
-                    />
+                  <svg className="animate-spin h-5 w-5 text-gray-500" viewBox="0 0 24 24" fill="none">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" />
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
                   </svg>
                 </div>
               )}
@@ -708,11 +580,7 @@ export default function Home() {
                   onChange={(e) => setAspectRatio(e.target.value)}
                   className="w-full rounded-lg border border-gray-200 bg-gray-50 px-2 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-black/10 focus:border-gray-300 transition cursor-pointer"
                 >
-                  {ASPECT_RATIOS.map((ar) => (
-                    <option key={ar} value={ar}>
-                      {ar}
-                    </option>
-                  ))}
+                  {ASPECT_RATIOS.map((ar) => <option key={ar} value={ar}>{ar}</option>)}
                 </select>
               </div>
               <div>
@@ -722,11 +590,7 @@ export default function Home() {
                   onChange={(e) => setResolution(e.target.value)}
                   className="w-full rounded-lg border border-gray-200 bg-gray-50 px-2 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-black/10 focus:border-gray-300 transition cursor-pointer"
                 >
-                  {RESOLUTIONS.map((r) => (
-                    <option key={r} value={r}>
-                      {r}
-                    </option>
-                  ))}
+                  {RESOLUTIONS.map((r) => <option key={r} value={r}>{r}</option>)}
                 </select>
               </div>
               <div>
@@ -736,11 +600,7 @@ export default function Home() {
                   onChange={(e) => setFormat(e.target.value)}
                   className="w-full rounded-lg border border-gray-200 bg-gray-50 px-2 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-black/10 focus:border-gray-300 transition cursor-pointer"
                 >
-                  {FORMATS.map((f) => (
-                    <option key={f} value={f}>
-                      {f}
-                    </option>
-                  ))}
+                  {FORMATS.map((f) => <option key={f} value={f}>{f}</option>)}
                 </select>
               </div>
             </div>
@@ -758,12 +618,9 @@ export default function Home() {
                 <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
               </svg>
             )}
-            {parsedPrompts.length <= 1
-              ? "Generate"
-              : `Generate ${parsedPrompts.length} Images`}
+            {parsedPrompts.length <= 1 ? "Generate" : `Generate ${parsedPrompts.length} Images`}
           </button>
 
-          {/* Progress summary */}
           {activeBulkCount > 0 && (
             <p className="text-xs text-gray-500 flex items-center gap-1.5">
               <span className="inline-block h-1.5 w-1.5 rounded-full bg-yellow-500 animate-pulse" />
@@ -780,40 +637,24 @@ export default function Home() {
 
       {/* ---- Right Panel ---- */}
       <main className="flex-1 flex flex-col overflow-hidden bg-[#fafafa]">
-        {/* Tabs */}
+        {/* Header */}
         <div className="flex items-center gap-1 px-6 pt-5 pb-3">
-          <button
-            onClick={() => setTab("recent")}
-            className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-colors cursor-pointer ${
-              tab === "recent"
-                ? "bg-black text-white"
-                : "bg-transparent text-gray-500 hover:text-gray-800 hover:bg-gray-100"
-            }`}
-          >
+          <span className="px-4 py-1.5 rounded-lg text-sm font-medium bg-black text-white">
             Recent
-          </button>
-          <button
-            onClick={() => setTab("gallery")}
-            className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-colors cursor-pointer ${
-              tab === "gallery"
-                ? "bg-black text-white"
-                : "bg-transparent text-gray-500 hover:text-gray-800 hover:bg-gray-100"
-            }`}
-          >
-            Gallery
-          </button>
+          </span>
 
-          {/* Recent tab actions */}
-          {tab === "recent" && sessionImages.length > 0 && (
+          {sessionImages.length > 0 && (
             <div className="ml-auto flex items-center gap-2">
               <button
-                onClick={() => { if (confirm("Clear all recent images?")) setSessionImages([]); }}
+                onClick={() => {
+                  if (confirm("Clear all recent images?")) setSessionImages([]);
+                }}
                 className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium bg-white border border-red-200 text-red-500 hover:bg-red-50 hover:border-red-400 transition-colors cursor-pointer shadow-sm"
               >
                 × Clear All
               </button>
               <button
-                onClick={handleDownloadAll}
+                onClick={() => downloadAsZip(sessionImages, "recent-ads.zip")}
                 className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium bg-white border border-gray-200 text-gray-700 hover:bg-gray-50 hover:border-gray-300 transition-colors cursor-pointer shadow-sm"
               >
                 <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -823,83 +664,36 @@ export default function Home() {
               </button>
             </div>
           )}
-
-          {/* Gallery tab actions */}
-          {tab === "gallery" && galleryImages.length > 0 && (
-            <div className="ml-auto flex items-center gap-2">
-              <button
-                onClick={async () => {
-                  if (!confirm("Delete all gallery images permanently?")) return;
-                  await fetch("/api/gallery", { method: "DELETE" });
-                  setGalleryImages([]);
-                }}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium bg-white border border-red-200 text-red-500 hover:bg-red-50 hover:border-red-400 transition-colors cursor-pointer shadow-sm"
-              >
-                × Clear All
-              </button>
-              <button
-                onClick={() => downloadAsZip(galleryImages, "gallery-ads.zip")}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium bg-white border border-gray-200 text-gray-700 hover:bg-gray-50 hover:border-gray-300 transition-colors cursor-pointer shadow-sm"
-              >
-                <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-                </svg>
-                Download All ({galleryImages.length})
-              </button>
-            </div>
-          )}
         </div>
 
         {/* Grid */}
         <div className="flex-1 overflow-y-auto px-6 pb-6">
-          {tab === "recent" && (
-            <>
-              {sessionImages.length === 0 && bulkTasks.length === 0 ? (
-                <div className="flex flex-col items-center justify-center h-full text-gray-400 select-none">
-                  <p className="text-7xl font-black tracking-tighter text-gray-800 uppercase flex gap-6">
-                    <span>RUN</span><span>MORE</span><span>ADS</span>
-                  </p>
-                </div>
-              ) : (
-                <div className="grid grid-cols-5 gap-4">
-                  {/* Task cards (in-progress + errors) */}
-                  {bulkTasks.map((t) =>
-                    t.stage === "error" ? (
-                      <ErrorCard key={t.taskId} onDismiss={() => dismissBulkTask(t.taskId)} />
-                    ) : (
-                      <ProcessingCard key={t.taskId} stage={t.stage} />
-                    )
-                  )}
-                  {/* Completed images */}
-                  {sessionImages.map((img) => (
-                    <ImageCard key={img.id} image={img} isNew={img.id === newestId} onPreview={(url, fmt) => setPreviewImage({ url, format: fmt })} />
-                  ))}
-                </div>
+          {sessionImages.length === 0 && bulkTasks.length === 0 ? (
+            <div className="flex flex-col items-center justify-center h-full text-gray-400 select-none">
+              <p className="text-7xl font-black tracking-tighter text-gray-800 uppercase flex gap-6">
+                <span>RUN</span><span>MORE</span><span>ADS</span>
+              </p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-5 gap-4">
+              {bulkTasks.map((t) =>
+                t.stage === "error" ? (
+                  <ErrorCard key={t.taskId} onDismiss={() => dismissBulkTask(t.taskId)} />
+                ) : (
+                  <ProcessingCard key={t.taskId} stage={t.stage} />
+                )
               )}
-            </>
-          )}
-
-          {tab === "gallery" && (
-            <>
-              {galleryLoading ? (
-                <div className="grid grid-cols-5 gap-4">
-                  {Array.from({ length: 10 }).map((_, i) => (
-                    <SkeletonCard key={i} />
-                  ))}
-                </div>
-              ) : galleryImages.length === 0 ? (
-                <div className="flex flex-col items-center justify-center h-full text-gray-400 select-none">
-                  <p className="text-sm">Gallery is empty</p>
-                  <p className="text-xs mt-1">Generated images will appear here</p>
-                </div>
-              ) : (
-                <div className="grid grid-cols-5 gap-4">
-                  {galleryImages.map((img) => (
-                    <ImageCard key={img.id} image={img} onDelete={deleteGalleryImage} onPreview={(url, fmt) => setPreviewImage({ url, format: fmt })} />
-                  ))}
-                </div>
-              )}
-            </>
+              {sessionImages.map((img) => (
+                <ImageCard
+                  key={img.id}
+                  image={img}
+                  isNew={img.id === newestId}
+                  onPreview={(url, fmt) => setPreviewImage({ url, format: fmt })}
+                  onDownload={downloadSingle}
+                  onDelete={(id) => setSessionImages((prev) => prev.filter((i) => i.id !== id))}
+                />
+              ))}
+            </div>
           )}
         </div>
       </main>
