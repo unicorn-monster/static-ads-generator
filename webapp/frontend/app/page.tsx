@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useRef, useCallback, useEffect } from "react";
+import JSZip from "jszip";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -98,7 +99,7 @@ function ProcessingCard({ stage }: { stage?: GenerationStage }) {
       ? STAGE_LABELS[stage]
       : "Processing...";
   return (
-    <div className="rounded-xl overflow-hidden bg-white shadow-sm border-2 border-yellow-400">
+    <div className="rounded overflow-hidden bg-white shadow-sm border-[1.5px] border-yellow-400">
       <div className="px-3 pt-3 pb-1">
         <span className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium bg-yellow-100 text-yellow-700">
           <svg className="animate-spin h-3 w-3" viewBox="0 0 24 24" fill="none">
@@ -118,7 +119,7 @@ function ProcessingCard({ stage }: { stage?: GenerationStage }) {
 
 function ErrorCard({ onDismiss }: { onDismiss?: () => void }) {
   return (
-    <div className="rounded-xl overflow-hidden bg-white shadow-sm border-2 border-red-300">
+    <div className="rounded overflow-hidden bg-white shadow-sm border-[1.5px] border-red-300">
       <div className="px-3 pt-3 pb-1 flex items-center justify-between">
         <span className="inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium bg-red-100 text-red-700">
           ✕ Failed
@@ -171,15 +172,17 @@ function SkeletonCard() {
 function ImageCard({
   image,
   onDelete,
+  onPreview,
   isNew,
 }: {
   image: SessionImage | GalleryImage;
   onDelete?: (id: string) => void;
+  onPreview?: (url: string, format: string) => void;
   isNew?: boolean;
 }) {
   return (
     <div
-      className={`group relative rounded-xl overflow-hidden bg-white shadow-sm hover:shadow-md transition-all duration-200 border-2 border-green-400 ${
+      className={`group relative rounded overflow-hidden bg-white shadow-sm hover:shadow-md transition-all duration-200 border-[1.5px] border-green-400 ${
         isNew ? "animate-fade-in-up" : ""
       }`}
     >
@@ -192,7 +195,8 @@ function ImageCard({
         <img
           src={image.image_url}
           alt={image.prompt}
-          className="w-full h-full object-cover transition-transform duration-200 group-hover:scale-[1.03]"
+          onClick={() => onPreview?.(image.image_url, image.settings.format)}
+          className="w-full h-full object-cover transition-transform duration-200 group-hover:scale-[1.03] cursor-zoom-in"
           loading="lazy"
         />
         {onDelete && (
@@ -250,6 +254,7 @@ export default function Home() {
   const [galleryImages, setGalleryImages] = useState<GalleryImage[]>([]);
   const [galleryLoading, setGalleryLoading] = useState(false);
   const [newestId, setNewestId] = useState<string | null>(null);
+  const [previewImage, setPreviewImage] = useState<{ url: string; format: string } | null>(null);
 
   // Tab
   const [tab, setTab] = useState<"recent" | "gallery">("recent");
@@ -301,6 +306,13 @@ export default function Home() {
     };
   }, []);
 
+  // Close lightbox on Esc
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => { if (e.key === "Escape") setPreviewImage(null); };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, []);
+
   // Clear newest highlight after a delay
   useEffect(() => {
     if (!newestId) return;
@@ -330,8 +342,8 @@ export default function Home() {
       const formData = new FormData();
       toUpload.forEach((f) => formData.append("files", f));
 
-      // Upload directly to backend to avoid Next.js proxy body size limits
-      const res = await fetch("http://localhost:8000/api/upload", {
+      // Upload via Next.js proxy
+      const res = await fetch("/api/upload", {
         method: "POST",
         body: formData,
       });
@@ -478,20 +490,26 @@ export default function Home() {
     setBulkTasks((prev) => prev.filter((t) => t.taskId !== taskId));
   };
 
-  const handleDownloadAll = async () => {
-    if (sessionImages.length === 0) return;
-    for (let i = 0; i < sessionImages.length; i++) {
-      const img = sessionImages[i];
-      const a = document.createElement("a");
-      a.href = img.image_url;
-      a.download = `image-${i + 1}.${img.settings.format}`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      // Small delay so the browser doesn't block simultaneous downloads
-      await new Promise((r) => setTimeout(r, 300));
-    }
+  const downloadAsZip = async (images: SessionImage[] | GalleryImage[], zipName: string) => {
+    const zip = new JSZip();
+    await Promise.all(
+      images.map(async (img, i) => {
+        const res = await fetch(img.image_url);
+        const blob = await res.blob();
+        zip.file(`image-${String(i + 1).padStart(2, "0")}.${img.settings.format}`, blob);
+      })
+    );
+    const content = await zip.generateAsync({ type: "blob" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(content);
+    a.download = zipName;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(a.href);
   };
+
+  const handleDownloadAll = () => downloadAsZip(sessionImages, "recent-ads.zip");
 
   const parsedPrompts = parseBulkPrompts(promptText);
   const activeBulkCount = bulkTasks.filter((t) => t.stage !== "error").length;
@@ -512,12 +530,20 @@ export default function Home() {
 
           {/* Prompts */}
           <div>
-            <div className="flex items-center justify-between mb-1.5">
+            <div className="flex items-center gap-2 mb-1.5">
               <label className="block text-sm font-medium text-gray-700">Prompt</label>
               {parsedPrompts.length > 1 && (
                 <span className="text-xs font-medium text-blue-600 bg-blue-50 rounded-full px-2 py-0.5">
                   {parsedPrompts.length} prompts
                 </span>
+              )}
+              {promptText && (
+                <button
+                  onClick={() => setPromptText("")}
+                  className="ml-auto text-xs font-medium text-red-400 hover:text-red-600 border border-red-300 hover:border-red-500 rounded px-2 py-0.5 transition-colors cursor-pointer"
+                >
+                  × Clear
+                </button>
               )}
             </div>
             <textarea
@@ -534,10 +560,20 @@ export default function Home() {
 
           {/* Image Input */}
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1.5">
-              Image Input
-              <span className="text-xs text-gray-400 font-normal ml-1">(optional, up to 14)</span>
-            </label>
+            <div className="flex items-center gap-2 mb-1.5">
+              <label className="block text-sm font-medium text-gray-700">
+                Image Input
+                <span className="text-xs text-gray-400 font-normal ml-1">(optional, up to 14)</span>
+              </label>
+              {uploadedImages.length > 0 && (
+                <button
+                  onClick={() => setUploadedImages([])}
+                  className="ml-auto text-xs font-medium text-red-400 hover:text-red-600 border border-red-300 hover:border-red-500 rounded px-2 py-0.5 transition-colors cursor-pointer"
+                >
+                  × Clear
+                </button>
+              )}
+            </div>
 
             {/* Drop zone */}
             <div
@@ -767,39 +803,50 @@ export default function Home() {
             Gallery
           </button>
 
-          {/* Download All */}
+          {/* Recent tab actions */}
           {tab === "recent" && sessionImages.length > 0 && (
-            <button
-              onClick={handleDownloadAll}
-              className="ml-auto flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium bg-white border border-gray-200 text-gray-700 hover:bg-gray-50 hover:border-gray-300 transition-colors cursor-pointer shadow-sm"
-            >
-              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-              </svg>
-              Download All ({sessionImages.length})
-            </button>
+            <div className="ml-auto flex items-center gap-2">
+              <button
+                onClick={() => { if (confirm("Clear all recent images?")) setSessionImages([]); }}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium bg-white border border-red-200 text-red-500 hover:bg-red-50 hover:border-red-400 transition-colors cursor-pointer shadow-sm"
+              >
+                × Clear All
+              </button>
+              <button
+                onClick={handleDownloadAll}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium bg-white border border-gray-200 text-gray-700 hover:bg-gray-50 hover:border-gray-300 transition-colors cursor-pointer shadow-sm"
+              >
+                <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                </svg>
+                Download All ({sessionImages.length})
+              </button>
+            </div>
           )}
+
+          {/* Gallery tab actions */}
           {tab === "gallery" && galleryImages.length > 0 && (
-            <button
-              onClick={async () => {
-                for (let i = 0; i < galleryImages.length; i++) {
-                  const img = galleryImages[i];
-                  const a = document.createElement("a");
-                  a.href = img.image_url;
-                  a.download = `gallery-${i + 1}.${img.settings.format}`;
-                  document.body.appendChild(a);
-                  a.click();
-                  document.body.removeChild(a);
-                  await new Promise((r) => setTimeout(r, 300));
-                }
-              }}
-              className="ml-auto flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium bg-white border border-gray-200 text-gray-700 hover:bg-gray-50 hover:border-gray-300 transition-colors cursor-pointer shadow-sm"
-            >
-              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-              </svg>
-              Download All ({galleryImages.length})
-            </button>
+            <div className="ml-auto flex items-center gap-2">
+              <button
+                onClick={async () => {
+                  if (!confirm("Delete all gallery images permanently?")) return;
+                  await fetch("/api/gallery", { method: "DELETE" });
+                  setGalleryImages([]);
+                }}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium bg-white border border-red-200 text-red-500 hover:bg-red-50 hover:border-red-400 transition-colors cursor-pointer shadow-sm"
+              >
+                × Clear All
+              </button>
+              <button
+                onClick={() => downloadAsZip(galleryImages, "gallery-ads.zip")}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium bg-white border border-gray-200 text-gray-700 hover:bg-gray-50 hover:border-gray-300 transition-colors cursor-pointer shadow-sm"
+              >
+                <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                </svg>
+                Download All ({galleryImages.length})
+              </button>
+            </div>
           )}
         </div>
 
@@ -809,21 +856,9 @@ export default function Home() {
             <>
               {sessionImages.length === 0 && bulkTasks.length === 0 ? (
                 <div className="flex flex-col items-center justify-center h-full text-gray-400 select-none">
-                  <svg
-                    className="h-16 w-16 mb-3 text-gray-200"
-                    fill="none"
-                    viewBox="0 0 24 24"
-                    stroke="currentColor"
-                    strokeWidth={1}
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      d="M2.25 15.75l5.159-5.159a2.25 2.25 0 013.182 0l5.159 5.159m-1.5-1.5l1.409-1.409a2.25 2.25 0 013.182 0l2.909 2.909M3.75 21h16.5A2.25 2.25 0 0022.5 18.75V5.25A2.25 2.25 0 0020.25 3H3.75A2.25 2.25 0 001.5 5.25v13.5A2.25 2.25 0 003.75 21z"
-                    />
-                  </svg>
-                  <p className="text-sm">No images yet</p>
-                  <p className="text-xs mt-1">Enter a prompt and click Generate to get started</p>
+                  <p className="text-7xl font-black tracking-tighter text-gray-800 uppercase flex gap-6">
+                    <span>RUN</span><span>MORE</span><span>ADS</span>
+                  </p>
                 </div>
               ) : (
                 <div className="grid grid-cols-5 gap-4">
@@ -837,7 +872,7 @@ export default function Home() {
                   )}
                   {/* Completed images */}
                   {sessionImages.map((img) => (
-                    <ImageCard key={img.id} image={img} isNew={img.id === newestId} />
+                    <ImageCard key={img.id} image={img} isNew={img.id === newestId} onPreview={(url, fmt) => setPreviewImage({ url, format: fmt })} />
                   ))}
                 </div>
               )}
@@ -860,7 +895,7 @@ export default function Home() {
               ) : (
                 <div className="grid grid-cols-5 gap-4">
                   {galleryImages.map((img) => (
-                    <ImageCard key={img.id} image={img} onDelete={deleteGalleryImage} />
+                    <ImageCard key={img.id} image={img} onDelete={deleteGalleryImage} onPreview={(url, fmt) => setPreviewImage({ url, format: fmt })} />
                   ))}
                 </div>
               )}
@@ -868,6 +903,25 @@ export default function Home() {
           )}
         </div>
       </main>
+
+      {/* Lightbox */}
+      {previewImage && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm"
+          onClick={() => setPreviewImage(null)}
+        >
+          <div
+            className="relative max-w-4xl max-h-[90vh] w-full mx-6"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <img
+              src={previewImage.url}
+              alt="Preview"
+              className="w-full h-full object-contain rounded-lg shadow-2xl max-h-[85vh]"
+            />
+          </div>
+        </div>
+      )}
     </div>
   );
 }

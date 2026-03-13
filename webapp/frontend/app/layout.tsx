@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Kie AI Image Generator",
+  title: "🍋 Static Ads Generator",
   description: "Bulk AI image generation tool",
 };
 

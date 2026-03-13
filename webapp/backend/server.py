@@ -405,6 +405,18 @@ async def serve_image(filename: str):
     return FileResponse(fpath)
 
 
+@app.delete("/api/gallery")
+async def clear_gallery():
+    """Delete all images from the output directory."""
+    deleted = 0
+    for fname in os.listdir(OUTPUT_DIR):
+        fpath = os.path.join(OUTPUT_DIR, fname)
+        if os.path.isfile(fpath) and os.path.splitext(fname)[1].lower() in (".png", ".jpg", ".jpeg", ".webp"):
+            os.remove(fpath)
+            deleted += 1
+    return {"detail": f"deleted {deleted} images"}
+
+
 @app.delete("/api/gallery/{filename}")
 async def delete_image(filename: str):
     """Delete an image from the output directory."""

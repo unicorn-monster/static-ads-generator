@@ -9,7 +9,9 @@
     "lint": "next lint"
   },
   "dependencies": {
+    "@types/jszip": "^3.4.0",
     "cloudinary": "^2.9.0",
+    "jszip": "^3.10.1",
     "next": "^15.1.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0"
