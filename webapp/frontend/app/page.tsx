@@ -43,6 +43,8 @@ const STAGE_LABELS: Record<GenerationStage, string> = {
 // Constants
 // ---------------------------------------------------------------------------
 
+const GALLERY_KEY = "sag_gallery_v1";
+
 const ASPECT_RATIOS = ["1:1", "2:3", "3:2", "4:3", "9:16", "16:9", "21:9", "auto"];
 const RESOLUTIONS = ["1K", "2K", "4K"];
 const FORMATS = ["png", "jpg"];
@@ -196,8 +198,20 @@ export default function Home() {
 
   // Images
   const [sessionImages, setSessionImages] = useState<SessionImage[]>([]);
+  const [galleryImages, setGalleryImages] = useState<SessionImage[]>([]);
   const [newestId, setNewestId] = useState<string | null>(null);
   const [previewImage, setPreviewImage] = useState<{ url: string; format: string } | null>(null);
+
+  // Tab
+  const [tab, setTab] = useState<"recent" | "gallery">("recent");
+
+  // Load gallery from localStorage on mount
+  useEffect(() => {
+    try {
+      const stored = localStorage.getItem(GALLERY_KEY);
+      if (stored) setGalleryImages(JSON.parse(stored));
+    } catch { /* ignore */ }
+  }, []);
 
   // Cleanup polling intervals on unmount
   useEffect(() => {
@@ -352,6 +366,11 @@ export default function Home() {
               timestamp: Date.now(),
             };
             setSessionImages((prev) => [newImage, ...prev]);
+            setGalleryImages((prev) => {
+              const updated = [newImage, ...prev];
+              try { localStorage.setItem(GALLERY_KEY, JSON.stringify(updated)); } catch { /* ignore */ }
+              return updated;
+            });
             setNewestId(placeholderId);
           } else if (pollData.state === "failed") {
             clearInterval(interval);
@@ -427,6 +446,19 @@ export default function Home() {
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(a.href);
+  };
+
+  const deleteGalleryImage = (id: string) => {
+    setGalleryImages((prev) => {
+      const updated = prev.filter((img) => img.id !== id);
+      try { localStorage.setItem(GALLERY_KEY, JSON.stringify(updated)); } catch { /* ignore */ }
+      return updated;
+    });
+  };
+
+  const clearGallery = () => {
+    setGalleryImages([]);
+    try { localStorage.removeItem(GALLERY_KEY); } catch { /* ignore */ }
   };
 
   const parsedPrompts = parseBulkPrompts(promptText);
@@ -637,18 +669,29 @@ export default function Home() {
 
       {/* ---- Right Panel ---- */}
       <main className="flex-1 flex flex-col overflow-hidden bg-[#fafafa]">
-        {/* Header */}
+        {/* Tabs */}
         <div className="flex items-center gap-1 px-6 pt-5 pb-3">
-          <span className="px-4 py-1.5 rounded-lg text-sm font-medium bg-black text-white">
+          <button
+            onClick={() => setTab("recent")}
+            className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-colors cursor-pointer ${
+              tab === "recent" ? "bg-black text-white" : "bg-transparent text-gray-500 hover:text-gray-800 hover:bg-gray-100"
+            }`}
+          >
             Recent
-          </span>
+          </button>
+          <button
+            onClick={() => setTab("gallery")}
+            className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-colors cursor-pointer ${
+              tab === "gallery" ? "bg-black text-white" : "bg-transparent text-gray-500 hover:text-gray-800 hover:bg-gray-100"
+            }`}
+          >
+            Gallery {galleryImages.length > 0 && <span className="ml-1 text-xs opacity-60">({galleryImages.length})</span>}
+          </button>
 
-          {sessionImages.length > 0 && (
+          {tab === "recent" && sessionImages.length > 0 && (
             <div className="ml-auto flex items-center gap-2">
               <button
-                onClick={() => {
-                  if (confirm("Clear all recent images?")) setSessionImages([]);
-                }}
+                onClick={() => { if (confirm("Clear all recent images?")) setSessionImages([]); }}
                 className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium bg-white border border-red-200 text-red-500 hover:bg-red-50 hover:border-red-400 transition-colors cursor-pointer shadow-sm"
               >
                 × Clear All
@@ -664,36 +707,83 @@ export default function Home() {
               </button>
             </div>
           )}
+
+          {tab === "gallery" && galleryImages.length > 0 && (
+            <div className="ml-auto flex items-center gap-2">
+              <button
+                onClick={() => { if (confirm("Clear all gallery images?")) clearGallery(); }}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium bg-white border border-red-200 text-red-500 hover:bg-red-50 hover:border-red-400 transition-colors cursor-pointer shadow-sm"
+              >
+                × Clear All
+              </button>
+              <button
+                onClick={() => downloadAsZip(galleryImages, "gallery-ads.zip")}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium bg-white border border-gray-200 text-gray-700 hover:bg-gray-50 hover:border-gray-300 transition-colors cursor-pointer shadow-sm"
+              >
+                <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                </svg>
+                Download All ({galleryImages.length})
+              </button>
+            </div>
+          )}
         </div>
 
         {/* Grid */}
         <div className="flex-1 overflow-y-auto px-6 pb-6">
-          {sessionImages.length === 0 && bulkTasks.length === 0 ? (
-            <div className="flex flex-col items-center justify-center h-full text-gray-400 select-none">
-              <p className="text-7xl font-black tracking-tighter text-gray-800 uppercase flex gap-6">
-                <span>RUN</span><span>MORE</span><span>ADS</span>
-              </p>
-            </div>
-          ) : (
-            <div className="grid grid-cols-5 gap-4">
-              {bulkTasks.map((t) =>
-                t.stage === "error" ? (
-                  <ErrorCard key={t.taskId} onDismiss={() => dismissBulkTask(t.taskId)} />
-                ) : (
-                  <ProcessingCard key={t.taskId} stage={t.stage} />
-                )
+          {tab === "recent" && (
+            <>
+              {sessionImages.length === 0 && bulkTasks.length === 0 ? (
+                <div className="flex flex-col items-center justify-center h-full text-gray-400 select-none">
+                  <p className="text-7xl font-black tracking-tighter text-gray-800 uppercase flex gap-6">
+                    <span>RUN</span><span>MORE</span><span>ADS</span>
+                  </p>
+                </div>
+              ) : (
+                <div className="grid grid-cols-5 gap-4">
+                  {bulkTasks.map((t) =>
+                    t.stage === "error" ? (
+                      <ErrorCard key={t.taskId} onDismiss={() => dismissBulkTask(t.taskId)} />
+                    ) : (
+                      <ProcessingCard key={t.taskId} stage={t.stage} />
+                    )
+                  )}
+                  {sessionImages.map((img) => (
+                    <ImageCard
+                      key={img.id}
+                      image={img}
+                      isNew={img.id === newestId}
+                      onPreview={(url, fmt) => setPreviewImage({ url, format: fmt })}
+                      onDownload={downloadSingle}
+                      onDelete={(id) => setSessionImages((prev) => prev.filter((i) => i.id !== id))}
+                    />
+                  ))}
+                </div>
               )}
-              {sessionImages.map((img) => (
-                <ImageCard
-                  key={img.id}
-                  image={img}
-                  isNew={img.id === newestId}
-                  onPreview={(url, fmt) => setPreviewImage({ url, format: fmt })}
-                  onDownload={downloadSingle}
-                  onDelete={(id) => setSessionImages((prev) => prev.filter((i) => i.id !== id))}
-                />
-              ))}
-            </div>
+            </>
+          )}
+
+          {tab === "gallery" && (
+            <>
+              {galleryImages.length === 0 ? (
+                <div className="flex flex-col items-center justify-center h-full text-gray-400 select-none">
+                  <p className="text-sm">Gallery is empty</p>
+                  <p className="text-xs mt-1">Generated images will appear here</p>
+                </div>
+              ) : (
+                <div className="grid grid-cols-5 gap-4">
+                  {galleryImages.map((img) => (
+                    <ImageCard
+                      key={img.id}
+                      image={img}
+                      onPreview={(url, fmt) => setPreviewImage({ url, format: fmt })}
+                      onDownload={downloadSingle}
+                      onDelete={deleteGalleryImage}
+                    />
+                  ))}
+                </div>
+              )}
+            </>
           )}
         </div>
       </main>
