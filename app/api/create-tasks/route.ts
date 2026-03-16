@@ -14,12 +14,12 @@ async function createKieTask(
 ): Promise<string> {
   const input: Record<string, unknown> = {
     prompt,
-    aspectRatio,
+    aspect_ratio: aspectRatio,
     resolution,
-    outputFormat,
+    output_format: outputFormat,
   };
   if (imageUrls.length > 0) {
-    input.imageInput = imageUrls;
+    input.image_input = imageUrls;
   }
 
   for (let attempt = 1; attempt <= 3; attempt++) {
