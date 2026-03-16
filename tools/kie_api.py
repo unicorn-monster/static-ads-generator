@@ -87,12 +87,12 @@ def create_task(api_key, prompt, aspect_ratio="1:1", resolution="1K",
     url = f"{BASE_URL}/createTask"
     input_data = {
         "prompt": prompt,
-        "aspectRatio": aspect_ratio,
+        "aspect_ratio": aspect_ratio,
         "resolution": resolution,
-        "outputFormat": output_format,
+        "output_format": output_format,
     }
     if image_input:
-        input_data["imageInput"] = image_input
+        input_data["image_input"] = image_input
 
     payload = {
         "model": "nano-banana-2",
