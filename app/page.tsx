@@ -45,7 +45,7 @@ const STAGE_LABELS: Record<GenerationStage, string> = {
 
 const GALLERY_KEY = "sag_gallery_v1";
 
-const ASPECT_RATIOS = ["1:1", "4:5", "9:16", "16:9"];
+const ASPECT_RATIOS = ["auto", "1:1", "4:5", "9:16", "16:9"];
 const RESOLUTIONS = ["1K", "2K", "4K"];
 const FORMATS = ["png", "jpg"];
 
