@@ -50,9 +50,9 @@ const RESOLUTIONS = ["1K", "2K", "4K"];
 const FORMATS = ["png", "jpg"];
 
 const MODELS = [
-  { id: "nano-banana-2", label: "Nano Banana 2" },
-  { id: "nano-banana-pro", label: "Nano Banana Pro" },
-  { id: "gpt-image-2-image-to-image", label: "GPT Image-2 (img→img)" },
+  { id: "nano-banana-2", label: "Nano Banana 2 — $0.04" },
+  { id: "nano-banana-pro", label: "Nano Banana Pro — $0.09" },
+  { id: "gpt-image-2-image-to-image", label: "GPT Image-2 — $0.06" },
 ] as const;
 type ModelId = typeof MODELS[number]["id"];
 
