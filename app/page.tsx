@@ -49,6 +49,12 @@ const ASPECT_RATIOS = ["auto", "1:1", "4:5", "9:16", "16:9"];
 const RESOLUTIONS = ["1K", "2K", "4K"];
 const FORMATS = ["png", "jpg"];
 
+const MODELS = [
+  { id: "nano-banana-2", label: "Nano Banana 2" },
+  { id: "gpt-image-2-image-to-image", label: "GPT Image-2 (img→img)" },
+] as const;
+type ModelId = typeof MODELS[number]["id"];
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -183,11 +189,15 @@ export default function Home() {
   const [aspectRatio, setAspectRatio] = useState("1:1");
   const [resolution, setResolution] = useState("1K");
   const [format, setFormat] = useState("png");
+  const [model, setModel] = useState<ModelId>("nano-banana-2");
+  const isGptImage2 = model === "gpt-image-2-image-to-image";
+  const maxImages = isGptImage2 ? 16 : 14;
 
   // Image input state
   const [uploadedImages, setUploadedImages] = useState<
     { filename: string; url: string; file?: File }[]
   >([]);
+  const missingImages = isGptImage2 && uploadedImages.length === 0;
   const [uploading, setUploading] = useState(false);
   const [dragOver, setDragOver] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -243,7 +253,7 @@ export default function Home() {
 
   const handleUploadFiles = async (files: FileList | File[]) => {
     const fileArray = Array.from(files);
-    const remaining = 14 - uploadedImages.length;
+    const remaining = maxImages - uploadedImages.length;
     const toUpload = fileArray.slice(0, remaining);
     if (toUpload.length === 0) return;
 
@@ -302,6 +312,7 @@ export default function Home() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          model,
           prompts,
           aspectRatio,
           resolution,
@@ -513,7 +524,9 @@ export default function Home() {
             <div className="flex items-center gap-2 mb-1.5">
               <label className="block text-sm font-medium text-gray-700">
                 Image Input
-                <span className="text-xs text-gray-400 font-normal ml-1">(optional, up to 14)</span>
+                <span className="text-xs text-gray-400 font-normal ml-1">
+                  {isGptImage2 ? `(required, 1–${maxImages})` : `(optional, up to ${maxImages})`}
+                </span>
               </label>
               {uploadedImages.length > 0 && (
                 <button
@@ -555,7 +568,7 @@ export default function Home() {
                   </svg>
                   <p className="text-xs">Click to upload or drag and drop</p>
                   <p className="text-[10px] mt-0.5 text-gray-300">
-                    JPEG, PNG, WEBP &middot; Max 30MB &middot; Up to 14 files
+                    JPEG, PNG, WEBP &middot; Max 30MB &middot; Up to {maxImages} files
                   </p>
                 </div>
               ) : (
@@ -577,7 +590,7 @@ export default function Home() {
                       </button>
                     </div>
                   ))}
-                  {uploadedImages.length < 14 && (
+                  {uploadedImages.length < maxImages && (
                     <div className="flex items-center justify-center aspect-square rounded-lg border border-dashed border-gray-200 text-gray-300 hover:border-gray-400 hover:text-gray-400 transition-colors">
                       <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                         <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
@@ -604,7 +617,19 @@ export default function Home() {
           {/* Settings */}
           <div>
             <h2 className="text-sm font-medium text-gray-700 mb-2">Settings</h2>
-            <div className="grid grid-cols-3 gap-2">
+            <div className="mb-2">
+              <label className="block text-xs text-gray-500 mb-1">Model</label>
+              <select
+                value={model}
+                onChange={(e) => setModel(e.target.value as ModelId)}
+                className="w-full rounded-lg border border-gray-200 bg-gray-50 px-2 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-black/10 focus:border-gray-300 transition cursor-pointer"
+              >
+                {MODELS.map((m) => (
+                  <option key={m.id} value={m.id}>{m.label}</option>
+                ))}
+              </select>
+            </div>
+            {!isGptImage2 && <div className="grid grid-cols-3 gap-2">
               <div>
                 <label className="block text-xs text-gray-500 mb-1">Aspect Ratio</label>
                 <select
@@ -635,13 +660,13 @@ export default function Home() {
                   {FORMATS.map((f) => <option key={f} value={f}>{f}</option>)}
                 </select>
               </div>
-            </div>
+            </div>}
           </div>
 
           {/* Generate Button */}
           <button
             onClick={handleBulkGenerate}
-            disabled={parsedPrompts.length === 0}
+            disabled={parsedPrompts.length === 0 || missingImages}
             className="w-full rounded-lg bg-black text-white text-base font-semibold py-4 hover:bg-gray-800 disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer flex items-center justify-center gap-2"
           >
             {activeBulkCount > 0 && (
@@ -657,6 +682,11 @@ export default function Home() {
             <p className="text-xs text-gray-500 flex items-center gap-1.5">
               <span className="inline-block h-1.5 w-1.5 rounded-full bg-yellow-500 animate-pulse" />
               {activeBulkCount} image{activeBulkCount !== 1 ? "s" : ""} generating...
+            </p>
+          )}
+          {missingImages && (
+            <p className="text-xs text-gray-500">
+              Upload at least 1 image to generate with GPT Image-2.
             </p>
           )}
         </div>
