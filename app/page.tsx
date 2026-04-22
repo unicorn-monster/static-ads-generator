@@ -51,6 +51,7 @@ const FORMATS = ["png", "jpg"];
 
 const MODELS = [
   { id: "nano-banana-2", label: "Nano Banana 2" },
+  { id: "nano-banana-pro", label: "Nano Banana Pro" },
   { id: "gpt-image-2-image-to-image", label: "GPT Image-2 (img→img)" },
 ] as const;
 type ModelId = typeof MODELS[number]["id"];
@@ -191,7 +192,7 @@ export default function Home() {
   const [format, setFormat] = useState("png");
   const [model, setModel] = useState<ModelId>("nano-banana-2");
   const isGptImage2 = model === "gpt-image-2-image-to-image";
-  const maxImages = isGptImage2 ? 16 : 14;
+  const maxImages = model === "gpt-image-2-image-to-image" ? 16 : model === "nano-banana-pro" ? 8 : 14;
 
   // Image input state
   const [uploadedImages, setUploadedImages] = useState<

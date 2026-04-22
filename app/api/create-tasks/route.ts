@@ -4,9 +4,9 @@ export const maxDuration = 60;
 
 const KIE_BASE_URL = "https://api.kie.ai/api/v1/jobs";
 
-type KieModel = "nano-banana-2" | "gpt-image-2-image-to-image";
+type KieModel = "nano-banana-2" | "nano-banana-pro" | "gpt-image-2-image-to-image";
 
-const ALLOWED_MODELS: KieModel[] = ["nano-banana-2", "gpt-image-2-image-to-image"];
+const ALLOWED_MODELS: KieModel[] = ["nano-banana-2", "nano-banana-pro", "gpt-image-2-image-to-image"];
 
 interface NanoBananaOptions {
   aspectRatio: string;
@@ -97,6 +97,16 @@ export async function POST(req: Request) {
     if (urls.length > 16) {
       return NextResponse.json(
         { detail: "GPT Image-2 supports maximum 16 input images" },
+        { status: 400 }
+      );
+    }
+  }
+
+  if (model === "nano-banana-pro") {
+    const urls = Array.isArray(imageUrls) ? imageUrls : [];
+    if (urls.length > 8) {
+      return NextResponse.json(
+        { detail: "Nano Banana Pro supports maximum 8 input images" },
         { status: 400 }
       );
     }

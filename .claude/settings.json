@@ -2,6 +2,9 @@
   "permissions": {
     "additionalDirectories": [
       "/Users/quanghuy/Documents/img-gen-huy/.claude"
+    ],
+    "allow": [
+      "Bash(git -C /Users/quanghuy/Documents/img-gen-huy add .)"
     ]
   }
 }
