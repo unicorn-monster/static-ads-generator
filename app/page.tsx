@@ -46,13 +46,14 @@ const STAGE_LABELS: Record<GenerationStage, string> = {
 const GALLERY_KEY = "sag_gallery_v1";
 
 const ASPECT_RATIOS = ["auto", "1:1", "4:5", "9:16", "16:9"];
+const GPT_ASPECT_RATIOS = ["auto", "1:1", "5:4", "9:16", "21:9", "16:9", "4:3", "3:2", "4:5", "3:4", "2:3"];
 const RESOLUTIONS = ["1K", "2K", "4K"];
 const FORMATS = ["png", "jpg"];
 
 const MODELS = [
   { id: "nano-banana-2", label: "Nano Banana 2 — $0.04" },
   { id: "nano-banana-pro", label: "Nano Banana Pro — $0.09" },
-  { id: "gpt-image-2-image-to-image", label: "GPT Image-2 — $0.06" },
+  { id: "gpt-image-2-image-to-image", label: "GPT Image-2 — $0.03" },
 ] as const;
 type ModelId = typeof MODELS[number]["id"];
 
@@ -630,7 +631,7 @@ export default function Home() {
                 ))}
               </select>
             </div>
-            {!isGptImage2 && <div className="grid grid-cols-3 gap-2">
+            <div className={`grid gap-2 ${isGptImage2 ? "grid-cols-2" : "grid-cols-3"}`}>
               <div>
                 <label className="block text-xs text-gray-500 mb-1">Aspect Ratio</label>
                 <select
@@ -638,7 +639,7 @@ export default function Home() {
                   onChange={(e) => setAspectRatio(e.target.value)}
                   className="w-full rounded-lg border border-gray-200 bg-gray-50 px-2 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-black/10 focus:border-gray-300 transition cursor-pointer"
                 >
-                  {ASPECT_RATIOS.map((ar) => <option key={ar} value={ar}>{ar}</option>)}
+                  {(isGptImage2 ? GPT_ASPECT_RATIOS : ASPECT_RATIOS).map((ar) => <option key={ar} value={ar}>{ar}</option>)}
                 </select>
               </div>
               <div>
@@ -651,7 +652,7 @@ export default function Home() {
                   {RESOLUTIONS.map((r) => <option key={r} value={r}>{r}</option>)}
                 </select>
               </div>
-              <div>
+              {!isGptImage2 && <div>
                 <label className="block text-xs text-gray-500 mb-1">Format</label>
                 <select
                   value={format}
@@ -660,8 +661,8 @@ export default function Home() {
                 >
                   {FORMATS.map((f) => <option key={f} value={f}>{f}</option>)}
                 </select>
-              </div>
-            </div>}
+              </div>}
+            </div>
           </div>
 
           {/* Generate Button */}

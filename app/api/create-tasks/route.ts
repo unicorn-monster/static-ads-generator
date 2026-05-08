@@ -26,6 +26,8 @@ async function createKieTask(
       ? {
           prompt,
           input_urls: options.imageUrls,
+          aspect_ratio: options.aspectRatio,
+          resolution: options.resolution,
           nsfw_checker: false,
         }
       : (() => {
