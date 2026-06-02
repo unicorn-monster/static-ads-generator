@@ -41,6 +41,16 @@ export interface ModelSpec {
   resolveModelId: (hasImage: boolean) => string;
   /** Build the Kie `input` body for this model. */
   buildInput: (o: BuildOpts) => Record<string, unknown>;
+  /** Estimate total Kie credits for the given settings, or null if pricing is uncertain. */
+  priceCredits?: (o: PriceOpts) => number | null;
+}
+
+/** Inputs for dynamic price estimation. */
+export interface PriceOpts {
+  resolution: string;
+  duration?: number; // video seconds
+  count: number; // number of outputs (images); video is always 1
+  generateAudio?: boolean;
 }
 
 /** A generated output (image or video) shown in Recent/Gallery. */

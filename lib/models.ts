@@ -19,6 +19,25 @@ const IMG_FORMATS = ["png", "jpg"];
 export const MODELS: ModelSpec[] = [
   // --- Image (existing, behavior preserved) ----------------------------------
   {
+    id: "gpt-image-2-image-to-image",
+    label: "GPT Image-2 — 800đ", // $0.03 × 26,300đ (rounded up)
+    modality: "image",
+    feature: "Create Image",
+    imageInput: "required",
+    maxImages: 16,
+    aspectRatios: GPT_ASPECT_RATIOS,
+    // NOTE: Kie's gpt-image-2 image-to-image no longer accepts `resolution` — sending it -> 500.
+    defaults: { aspectRatio: "1:1" },
+    resolveModelId: () => "gpt-image-2-image-to-image",
+    priceCredits: ({ count }) => 6 * count, // 1K only (resolution removed); 6 cr/img
+    buildInput: ({ prompt, imageUrls, aspectRatio }) => ({
+      prompt,
+      input_urls: imageUrls,
+      aspect_ratio: aspectRatio,
+      nsfw_checker: false,
+    }),
+  },
+  {
     id: "nano-banana-2",
     label: "Nano Banana 2 — 1,100đ", // $0.04 × 26,300đ (rounded up)
     modality: "image",
@@ -30,6 +49,7 @@ export const MODELS: ModelSpec[] = [
     formats: IMG_FORMATS,
     defaults: { aspectRatio: "1:1", resolution: "1K" },
     resolveModelId: () => "nano-banana-2",
+    priceCredits: ({ resolution, count }) => (({ "1K": 8, "2K": 12, "4K": 18 } as Record<string, number>)[resolution] ?? 8) * count,
     buildInput: ({ prompt, imageUrls, aspectRatio, resolution, outputFormat }) => {
       const input: Record<string, unknown> = {
         prompt,
@@ -53,6 +73,7 @@ export const MODELS: ModelSpec[] = [
     formats: IMG_FORMATS,
     defaults: { aspectRatio: "1:1", resolution: "1K" },
     resolveModelId: () => "nano-banana-pro",
+    priceCredits: ({ resolution, count }) => (({ "1K": 18, "2K": 18, "4K": 24 } as Record<string, number>)[resolution] ?? 18) * count,
     buildInput: ({ prompt, imageUrls, aspectRatio, resolution, outputFormat }) => {
       const input: Record<string, unknown> = {
         prompt,
@@ -64,29 +85,11 @@ export const MODELS: ModelSpec[] = [
       return input;
     },
   },
-  {
-    id: "gpt-image-2-image-to-image",
-    label: "GPT Image-2 — 800đ", // $0.03 × 26,300đ (rounded up)
-    modality: "image",
-    feature: "Create Image",
-    imageInput: "required",
-    maxImages: 16,
-    aspectRatios: GPT_ASPECT_RATIOS,
-    // NOTE: Kie's gpt-image-2 image-to-image no longer accepts `resolution` — sending it -> 500.
-    defaults: { aspectRatio: "1:1" },
-    resolveModelId: () => "gpt-image-2-image-to-image",
-    buildInput: ({ prompt, imageUrls, aspectRatio }) => ({
-      prompt,
-      input_urls: imageUrls,
-      aspect_ratio: aspectRatio,
-      nsfw_checker: false,
-    }),
-  },
 
   // --- Video (new) -----------------------------------------------------------
   {
     id: "seedance-2",
-    label: "Seedance 2.0 — 4,700đ/s", // 720p est. ~35.6 cr/s × $0.005 × 26,300đ (rounded up)
+    label: "Seedance 2.0 — 5.400đ/s", // 720p: 41 cr/s × 131.5đ (no-video rate; button shows exact)
     modality: "video",
     feature: "Create Video",
     imageInput: "optional",
@@ -105,6 +108,10 @@ export const MODELS: ModelSpec[] = [
     defaults: { aspectRatio: "16:9", resolution: "720p" },
     extras: { audio: true },
     resolveModelId: () => "bytedance/seedance-2",
+    // "no video" rate (Price × Output) — our i2v uses an image first-frame, not a video input.
+    // Audio-on may run ~10-15% higher (unconfirmed); shown price is the base no-audio rate.
+    priceCredits: ({ resolution, duration }) =>
+      (({ "480p": 19, "720p": 41, "1080p": 102 } as Record<string, number>)[resolution] ?? 19) * (duration ?? 5),
     buildInput: ({ prompt, imageUrls, aspectRatio, resolution, duration, generateAudio, nsfwChecker }) => {
       const input: Record<string, unknown> = {
         prompt,
@@ -156,6 +163,8 @@ export const MODELS: ModelSpec[] = [
       }
       return input;
     },
+    priceCredits: ({ resolution, duration }) =>
+      (({ "480p": 1.6, "720p": 3 } as Record<string, number>)[resolution] ?? 3) * (duration ?? 6),
   },
 ];
 

@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import JSZip from "jszip";
 import { getModel } from "@/lib/models";
+import { creditsToVnd, formatVnd } from "@/lib/pricing";
 import type { Modality, ModelSpec, SessionItem } from "@/lib/types";
 import { useGallery } from "@/app/hooks/useGallery";
 import { useGeneration } from "@/app/hooks/useGeneration";
@@ -183,6 +184,15 @@ export function GeneratorWorkspace({
       : `Generate ${prompts.length} ${noun}s`
     : `Generate ${noun}`;
 
+  // Dynamic price: credits from current settings × output count → VND. null = pricing uncertain (Seedance).
+  const priceCredits = model.priceCredits?.({
+    resolution: settings.resolution,
+    duration: settings.duration,
+    count: Math.max(prompts.length, 1),
+    generateAudio: settings.generateAudio,
+  });
+  const priceVnd = priceCredits != null ? creditsToVnd(priceCredits) : null;
+
   const list = tab === "recent" ? gallery.session : gallery.gallery;
 
   return (
@@ -232,7 +242,8 @@ export function GeneratorWorkspace({
                 <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
               </svg>
             )}
-            {genLabel}
+            <span>{genLabel}</span>
+            {priceVnd != null && <span className="font-normal opacity-80">· {formatVnd(priceVnd)}đ</span>}
           </button>
 
           {activeCount > 0 && (

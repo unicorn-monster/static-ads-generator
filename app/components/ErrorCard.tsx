@@ -2,7 +2,7 @@ export function ErrorCard({ onDismiss, message }: { onDismiss?: () => void; mess
   return (
     <div className="rounded overflow-hidden bg-slate-900 shadow-sm border-[1.5px] border-red-500/50">
       <div className="px-3 pt-3 pb-1 flex items-center justify-between">
-        <span className="inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium bg-red-500/50/15 text-red-400">
+        <span className="inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium bg-red-500/15 text-red-400">
           ✕ {message ?? "Failed"}
         </span>
         {onDismiss && (

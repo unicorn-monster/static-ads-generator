@@ -15,9 +15,8 @@ export function MegaNav() {
 
   return (
     <nav className="h-14 shrink-0 bg-slate-950 text-white flex items-center px-6 gap-1 z-40 relative">
-      <Link href="/image" className="font-semibold tracking-tight flex items-center gap-2 mr-4">
-        <span>🍋</span>
-        <span className="text-sm">Static Ads Generator</span>
+      <Link href="/image" className="flex items-center text-lg mr-2" title="Home">
+        🍋
       </Link>
 
       {NAV.map(({ modality, label, href }) => {
