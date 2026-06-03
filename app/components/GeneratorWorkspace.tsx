@@ -204,7 +204,7 @@ export function GeneratorWorkspace({
             onChange={setPromptText}
             mode={bulk ? "bulk" : "single"}
             count={prompts.length}
-            maxChars={modality === "video" ? 5000 : undefined}
+            maxChars={model.maxPromptChars}
           />
 
           {model.imageInput !== "none" && (

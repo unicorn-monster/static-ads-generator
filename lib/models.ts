@@ -98,6 +98,7 @@ export const MODELS: ModelSpec[] = [
     resolutions: ["480p", "720p", "1080p"],
     duration: { min: 4, max: 15, step: 1, default: 5 },
     exposeNsfw: true,
+    maxPromptChars: 20000, // verified from Seedance playground textarea maxLength
     notes: {
       aspect_ratio: "Video aspect ratio configuration.",
       duration: "Video duration in 4–15 seconds.",
@@ -136,6 +137,7 @@ export const MODELS: ModelSpec[] = [
     resolutions: ["480p", "720p"],
     duration: { min: 6, max: 30, step: 1, default: 6 },
     exposeNsfw: true,
+    maxPromptChars: 5000, // Grok docs: prompt max 5000 chars
     notes: {
       mode: "When generating videos using external image inputs, Spicy mode is not supported and will automatically switch to Normal.",
       aspect_ratio: "The aspect ratio of the video. This parameter is invalid if it is a single image.",

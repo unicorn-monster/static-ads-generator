@@ -34,6 +34,7 @@ export interface ModelSpec {
   formats?: string[]; // image png/jpg; absent => no format control (e.g. gpt-image-2)
   duration?: { min: number; max: number; step: number; default: number }; // video: slider range
   exposeNsfw?: boolean; // video: show nsfw_checker toggle
+  maxPromptChars?: number; // hard cap on prompt length (per Kie schema)
   notes?: Record<string, string>; // per-field helper text (Kie-style), keyed by field name
   defaults?: { aspectRatio?: string; resolution?: string; mode?: string };
   extras?: { audio?: boolean; modes?: string[] };
