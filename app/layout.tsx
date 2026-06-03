@@ -3,7 +3,7 @@ import "./globals.css";
 import { MegaNav } from "@/app/components/MegaNav";
 
 export const metadata: Metadata = {
-  title: "🍋 Static Ads Generator",
+  title: "Static Ads Generator",
   description: "All-in-one AI image & video generation",
 };
 
