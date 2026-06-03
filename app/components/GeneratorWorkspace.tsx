@@ -199,7 +199,13 @@ export function GeneratorWorkspace({
     <div className="flex h-full overflow-hidden">
       <aside className="w-[35%] min-w-[340px] max-w-[480px] border-r border-slate-700 bg-slate-900 flex flex-col">
         <div className="flex-1 overflow-y-auto p-6 space-y-6">
-          <PromptPanel value={promptText} onChange={setPromptText} mode={bulk ? "bulk" : "single"} count={prompts.length} />
+          <PromptPanel
+            value={promptText}
+            onChange={setPromptText}
+            mode={bulk ? "bulk" : "single"}
+            count={prompts.length}
+            maxChars={modality === "video" ? 5000 : undefined}
+          />
 
           {model.imageInput !== "none" && (
             <UploadDropzone

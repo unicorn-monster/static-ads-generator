@@ -5,13 +5,16 @@ export function PromptPanel({
   onChange,
   mode,
   count = 0,
+  maxChars,
 }: {
   value: string;
   onChange: (v: string) => void;
   mode: "bulk" | "single";
   count?: number;
+  maxChars?: number;
 }) {
   const isBulk = mode === "bulk";
+  const atLimit = maxChars != null && value.length >= maxChars;
   return (
     <div>
       <div className="flex items-center gap-2 mb-1.5">
@@ -33,6 +36,7 @@ export function PromptPanel({
       <textarea
         rows={6}
         value={value}
+        maxLength={maxChars}
         onChange={(e) => onChange(e.target.value)}
         placeholder={
           isBulk
@@ -41,11 +45,18 @@ export function PromptPanel({
         }
         className="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2.5 text-sm placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-slate-600 resize-none transition"
       />
-      <p className="text-[10px] text-slate-500 mt-1">
-        {isBulk
-          ? "Separate each prompt with a blank line. Max 20 at a time."
-          : "One video per generation."}
-      </p>
+      <div className="flex items-center justify-between mt-1 text-[10px]">
+        <span className="text-slate-500">
+          {isBulk
+            ? "Separate each prompt with a blank line. Max 20 at a time."
+            : "One video per generation."}
+        </span>
+        {maxChars != null && (
+          <span className={`tabular-nums ${atLimit ? "text-red-400 font-medium" : "text-slate-500"}`}>
+            {value.length.toLocaleString("vi-VN")}/{maxChars.toLocaleString("vi-VN")}
+          </span>
+        )}
+      </div>
     </div>
   );
 }
