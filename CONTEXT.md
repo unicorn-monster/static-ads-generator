@@ -44,6 +44,18 @@ _Avoid_: history, library (use "Recent" / "Gallery" precisely)
 A user-uploaded image hosted on Cloudinary so Kie can fetch it, used as input for image-to-image or image-to-video. Cloudinary only ever holds these _inputs_ — never outputs.
 _Avoid_: source image, seed image
 
+**Product**:
+The thing an ad creative promotes (e.g. "hatnet"). Entered by the user at sync time and slug-ified (lowercase, no diacritics/spaces) to form the Drive folder name. The grouping key for delivering outputs to Drive. Not a **Model** and not a **Modality**.
+_Avoid_: brand, campaign, item
+
+**Drive batch**:
+The set of outputs pushed to Google Drive in **one Sync action**, landing in a folder named `{product}-{YYYY-MM-DD}-{NNN}` under the fixed "Dino IMG" parent. `NNN` auto-increments per Product per day. A Drive batch is **not** a **Bulk**: Bulk is how images are _generated_ (one submit, many prompts); a Drive batch is how selected outputs are _delivered_ (one upload, any selection). Several Bulks can feed one Drive batch, or one Bulk can be split across many.
+_Avoid_: batch (unqualified — always say "Drive batch"), bulk
+
+**Drive sync (delivery)**:
+Uploading selected outputs into a **Drive batch** folder. Drive is a downstream **delivery target**, never a **Provider** (which is upstream + Kie-only). A separate external tool reads these folders to push creatives into Meta ads.
+_Avoid_: provider, export, backup
+
 ## Flagged ambiguities
 
 - **"Model" vs "Kie model ID"** — always distinguish. The UI/registry speaks in **Models**; the Kie client resolves a Model (+ has-image) to a **Kie model ID**. Grok = 1 Model → 2 IDs (`text-to-video`, `image-to-video`); Seedance = 1 Model → 1 ID with a `first_frame_url`.

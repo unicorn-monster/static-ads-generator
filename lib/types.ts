@@ -49,6 +49,7 @@ export interface ModelSpec {
 /** Inputs for dynamic price estimation. */
 export interface PriceOpts {
   resolution: string;
+  aspectRatio?: string; // some models clamp resolution by aspect ratio (e.g. gpt-image-2)
   duration?: number; // video seconds
   count: number; // number of outputs (images); video is always 1
   generateAudio?: boolean;

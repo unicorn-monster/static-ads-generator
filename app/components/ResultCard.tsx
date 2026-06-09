@@ -6,24 +6,28 @@ import type { SessionItem } from "@/lib/types";
 export function ResultCard({
   item,
   isNew,
+  selected,
   onPreview,
   onDownload,
   onDelete,
+  onToggleSelect,
 }: {
   item: SessionItem;
   isNew?: boolean;
+  selected?: boolean;
   onPreview?: (item: SessionItem) => void;
   onDownload?: (url: string, ext: string) => void;
   onDelete?: (id: string) => void;
+  onToggleSelect?: (id: string) => void;
 }) {
   const [expired, setExpired] = useState(false);
   const ext = String(item.settings.ext ?? (item.kind === "video" ? "mp4" : "png"));
 
   return (
     <div
-      className={`group relative rounded overflow-hidden bg-slate-900 shadow-sm hover:shadow-md transition-all duration-200 border-[1.5px] border-green-500/50 ${
-        isNew ? "animate-fade-in-up" : ""
-      }`}
+      className={`group relative rounded overflow-hidden bg-slate-900 shadow-sm hover:shadow-md transition-all duration-200 border-[1.5px] ${
+        selected ? "border-blue-500 ring-2 ring-blue-500/50" : "border-green-500/50"
+      } ${isNew ? "animate-fade-in-up" : ""}`}
     >
       <div className="px-3 pt-3 pb-1">
         <span className="inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium bg-green-500/15 text-green-400">
@@ -56,6 +60,25 @@ export function ResultCard({
             className="w-full h-full object-cover transition-transform duration-200 group-hover:scale-[1.03] cursor-zoom-in"
             loading="lazy"
           />
+        )}
+
+        {onToggleSelect && (
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              onToggleSelect(item.id);
+            }}
+            className={`absolute top-2 left-2 z-10 h-6 w-6 rounded-md border-2 flex items-center justify-center transition-colors cursor-pointer ${
+              selected ? "bg-blue-600 border-blue-500" : "bg-black/55 border-white/90 hover:border-white"
+            }`}
+            title={selected ? "Bỏ chọn" : "Chọn ảnh"}
+          >
+            {selected && (
+              <svg className="h-4 w-4 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={3}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+              </svg>
+            )}
+          </button>
         )}
 
         {onDelete && (

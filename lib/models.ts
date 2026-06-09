@@ -9,6 +9,14 @@ const GPT_ASPECT_RATIOS = ["auto", "1:1", "5:4", "9:16", "21:9", "16:9", "4:3", 
 const IMG_RESOLUTIONS = ["1K", "2K", "4K"];
 const IMG_FORMATS = ["png", "jpg"];
 
+// Kie gpt-image-2 constraint: aspect "auto"/unspecified -> 1K only; aspect "1:1" -> max 2K (no 4K).
+// Clamp the requested resolution to a valid one so the task never fails to create (500).
+function gptResolution(resolution: string, aspectRatio: string): string {
+  if (aspectRatio === "auto" || !aspectRatio) return "1K";
+  if (aspectRatio === "1:1" && resolution === "4K") return "2K";
+  return resolution;
+}
+
 // Video price labels: per-second VND at 720p, rounded up (Kie $0.005/credit, USD/VND ≈26,300).
 // Grok exact (3 cr/s @720p). Seedance estimated (~35.6 cr/s = measured 480p 19 cr/s × 1.875); refine if a 720p figure is confirmed.
 
@@ -26,14 +34,19 @@ export const MODELS: ModelSpec[] = [
     imageInput: "required",
     maxImages: 16,
     aspectRatios: GPT_ASPECT_RATIOS,
-    // NOTE: Kie's gpt-image-2 image-to-image no longer accepts `resolution` — sending it -> 500.
-    defaults: { aspectRatio: "1:1" },
+    resolutions: IMG_RESOLUTIONS,
+    // Kie constraints (docs): aspect "auto"/unspecified -> only 1K; aspect "1:1" -> no 4K.
+    // Sending an incompatible resolution+aspect_ratio combo makes the task fail to create (500).
+    defaults: { aspectRatio: "1:1", resolution: "1K" },
     resolveModelId: () => "gpt-image-2-image-to-image",
-    priceCredits: ({ count }) => 6 * count, // 1K only (resolution removed); 6 cr/img
-    buildInput: ({ prompt, imageUrls, aspectRatio }) => ({
+    // 1K = 6 cr (confirmed via playground Run button). TODO: confirm 2K/4K cr from Run button.
+    priceCredits: ({ resolution, aspectRatio, count }) =>
+      (({ "1K": 6, "2K": 6, "4K": 6 } as Record<string, number>)[gptResolution(resolution, aspectRatio ?? "1:1")] ?? 6) * count,
+    buildInput: ({ prompt, imageUrls, aspectRatio, resolution }) => ({
       prompt,
       input_urls: imageUrls,
       aspect_ratio: aspectRatio,
+      resolution: gptResolution(resolution, aspectRatio),
       nsfw_checker: false,
     }),
   },

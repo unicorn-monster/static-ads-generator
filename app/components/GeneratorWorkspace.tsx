@@ -59,6 +59,21 @@ export function GeneratorWorkspace({
   const [preview, setPreview] = useState<{ url: string; kind: Modality } | null>(null);
   const [newestId, setNewestId] = useState<string | null>(null);
 
+  // Drive sync: selection + modal state
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [syncOpen, setSyncOpen] = useState(false);
+  const [product, setProduct] = useState("");
+  const [syncing, setSyncing] = useState(false);
+  const [syncProgress, setSyncProgress] = useState<{ done: number; total: number } | null>(null);
+  const [syncError, setSyncError] = useState<string | null>(null);
+  const [syncResult, setSyncResult] = useState<
+    {
+      folders: { folderName: string; webViewLink: string | null }[];
+      count: number;
+      failed: { name: string; reason: string }[];
+    } | null
+  >(null);
+
   const gallery = useGallery(storageKey);
   const { tasks, generate, dismiss } = useGeneration(
     useCallback(
@@ -85,6 +100,28 @@ export function GeneratorWorkspace({
     const t = setTimeout(() => setNewestId(null), 2000);
     return () => clearTimeout(t);
   }, [newestId]);
+
+  // Remember last product name across sessions.
+  useEffect(() => {
+    try {
+      const p = localStorage.getItem("sag_last_product");
+      if (p) setProduct(p);
+    } catch {}
+  }, []);
+
+  // Selection is per-list; reset when switching Recent/Gallery.
+  useEffect(() => {
+    setSelectedIds(new Set());
+  }, [tab]);
+
+  const toggleSelect = useCallback((id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
 
   const onModelChange = (id: string) => {
     const next = getModel(id);
@@ -187,6 +224,7 @@ export function GeneratorWorkspace({
   // Dynamic price: credits from current settings × output count → VND. null = pricing uncertain (Seedance).
   const priceCredits = model.priceCredits?.({
     resolution: settings.resolution,
+    aspectRatio: settings.aspectRatio,
     duration: settings.duration,
     count: Math.max(prompts.length, 1),
     generateAudio: settings.generateAudio,
@@ -194,6 +232,102 @@ export function GeneratorWorkspace({
   const priceVnd = priceCredits != null ? creditsToVnd(priceCredits) : null;
 
   const list = tab === "recent" ? gallery.session : gallery.gallery;
+
+  const selectedItems = list.filter((i) => selectedIds.has(i.id));
+  const allSelected = list.length > 0 && selectedItems.length === list.length;
+  const toggleSelectAll = () =>
+    setSelectedIds(allSelected ? new Set() : new Set(list.map((i) => i.id)));
+
+  const today = (() => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  })();
+  const productSlug = product.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[^a-z0-9]+/g, "");
+  const folderPreview = `${productSlug || "product"}-${today}-001`;
+
+  // A Drive folder holds at most 50 images (downstream Meta tool limit). Over that → auto-split.
+  const MAX_PER_FOLDER = 50;
+  const splitNeeded = selectedItems.length > MAX_PER_FOLDER;
+  const folderCount = Math.max(1, Math.ceil(selectedItems.length / MAX_PER_FOLDER));
+  const chunkSizes = Array.from({ length: folderCount }, (_, i) =>
+    Math.min(MAX_PER_FOLDER, selectedItems.length - i * MAX_PER_FOLDER)
+  );
+
+  const doSync = async () => {
+    setSyncing(true);
+    setSyncError(null);
+    const items = selectedItems.map((it, i) => {
+      const ext = String(it.settings.ext ?? (it.kind === "video" ? "mp4" : "png"));
+      return { url: it.mediaUrl, name: `${it.kind}-${String(i + 1).padStart(2, "0")}.${ext}` };
+    });
+    setSyncProgress({ done: 0, total: items.length });
+    try {
+      // Split into chunks of MAX_PER_FOLDER — each chunk becomes one Drive folder.
+      const chunks: (typeof items)[] = [];
+      for (let i = 0; i < items.length; i += MAX_PER_FOLDER) chunks.push(items.slice(i, i + MAX_PER_FOLDER));
+
+      // Step 1: create folders sequentially so batch numbers (-001, -002…) don't race.
+      const folders: { folderId: string; folderName: string; webViewLink: string | null }[] = [];
+      for (let c = 0; c < chunks.length; c++) {
+        const startRes = await fetch("/api/sync-drive/start", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ product, date: today }),
+        });
+        const startData = await startRes.json();
+        if (!startRes.ok) throw new Error(startData.detail ?? "Could not create folder");
+        folders.push({
+          folderId: startData.folderId,
+          folderName: startData.folderName,
+          webViewLink: startData.webViewLink,
+        });
+      }
+
+      // Step 2: upload every image (across all folders) with a concurrency pool; progress over the total.
+      const jobs = chunks.flatMap((chunk, c) => chunk.map((it) => ({ ...it, folderId: folders[c].folderId })));
+      let done = 0;
+      const failed: { name: string; reason: string }[] = [];
+      let idx = 0;
+      const worker = async () => {
+        while (idx < jobs.length) {
+          const job = jobs[idx++];
+          try {
+            const r = await fetch("/api/sync-drive/upload", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ folderId: job.folderId, url: job.url, name: job.name }),
+            });
+            if (!r.ok) {
+              const d = await r.json().catch(() => ({}));
+              throw new Error(d.detail ?? `failed ${r.status}`);
+            }
+          } catch (e) {
+            failed.push({ name: job.name, reason: e instanceof Error ? e.message : "unknown" });
+          } finally {
+            done++;
+            setSyncProgress({ done, total: jobs.length });
+          }
+        }
+      };
+      await Promise.all(Array.from({ length: Math.min(4, jobs.length) }, worker));
+
+      try {
+        localStorage.setItem("sag_last_product", product);
+      } catch {}
+      setSyncResult({
+        folders: folders.map((f) => ({ folderName: f.folderName, webViewLink: f.webViewLink })),
+        count: jobs.length - failed.length,
+        failed,
+      });
+      setSyncOpen(false);
+      setSelectedIds(new Set());
+    } catch (e) {
+      setSyncError(e instanceof Error ? e.message : "Sync failed");
+    } finally {
+      setSyncing(false);
+      setSyncProgress(null);
+    }
+  };
 
   return (
     <div className="flex h-full overflow-hidden">
@@ -308,6 +442,26 @@ export function GeneratorWorkspace({
                 </svg>
                 Download All ({list.length})
               </button>
+              <button
+                onClick={toggleSelectAll}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium bg-slate-900 border border-slate-700 text-slate-200 hover:bg-slate-800 hover:border-slate-600 transition-colors cursor-pointer shadow-sm"
+              >
+                {allSelected ? "Deselect All" : "Select All"}
+              </button>
+              <button
+                onClick={() => {
+                  setSyncResult(null);
+                  setSyncError(null);
+                  setSyncOpen(true);
+                }}
+                disabled={selectedItems.length === 0}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium bg-blue-600/15 border border-blue-500/50 text-blue-200 hover:bg-blue-600/25 transition-colors cursor-pointer shadow-sm disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M7 16a4 4 0 01-.88-7.9A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M9 13l3-3m0 0l3 3m-3-3v9" />
+                </svg>
+                Sync to Drive ({selectedItems.length})
+              </button>
             </div>
           )}
         </div>
@@ -334,6 +488,8 @@ export function GeneratorWorkspace({
                     key={item.id}
                     item={item}
                     isNew={item.id === newestId}
+                    selected={selectedIds.has(item.id)}
+                    onToggleSelect={toggleSelect}
                     onPreview={(it) => setPreview({ url: it.mediaUrl, kind: it.kind })}
                     onDownload={downloadSingle}
                     onDelete={gallery.removeSession}
@@ -352,6 +508,8 @@ export function GeneratorWorkspace({
                 <ResultCard
                   key={item.id}
                   item={item}
+                  selected={selectedIds.has(item.id)}
+                  onToggleSelect={toggleSelect}
                   onPreview={(it) => setPreview({ url: it.mediaUrl, kind: it.kind })}
                   onDownload={downloadSingle}
                   onDelete={gallery.removeGallery}
@@ -363,6 +521,136 @@ export function GeneratorWorkspace({
       </main>
 
       <Lightbox preview={preview} onClose={() => setPreview(null)} />
+
+      {syncOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 backdrop-blur-sm"
+          onClick={() => !syncing && setSyncOpen(false)}
+        >
+          <div
+            className="w-[420px] max-w-[92vw] rounded-2xl border border-slate-700 bg-slate-900 p-6 shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 className="text-lg font-semibold mb-4 flex items-center gap-2 text-slate-100">
+              <svg className="h-5 w-5 text-blue-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M7 16a4 4 0 01-.88-7.9A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M9 13l3-3m0 0l3 3m-3-3v9" />
+              </svg>
+              Sync to Google Drive
+            </h3>
+
+            <label className="block text-xs text-slate-400 mb-1.5">Product name</label>
+            <input
+              autoFocus
+              value={product}
+              onChange={(e) => setProduct(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && product.trim() && !syncing) doSync();
+              }}
+              placeholder="e.g. hatnet"
+              className="w-full px-3 py-2.5 rounded-lg bg-slate-950 border border-slate-700 text-slate-200 text-sm outline-none focus:border-blue-500 mb-3.5"
+            />
+
+            {splitNeeded ? (
+              <div className="rounded-lg border border-amber-500/50 bg-amber-500/10 p-3 text-[13px]">
+                <div className="text-amber-400 font-semibold mb-2">
+                  ⚠ You selected {selectedItems.length} images — over {MAX_PER_FOLDER}/folder → will create {folderCount} folders
+                </div>
+                <div className="flex flex-col gap-1.5">
+                  {chunkSizes.map((n, i) => (
+                    <div
+                      key={i}
+                      className="flex justify-between items-center rounded-md border border-slate-800 bg-slate-950 px-2.5 py-1.5"
+                    >
+                      <span className="font-mono font-bold text-green-400 text-xs">
+                        📁 {productSlug || "product"}-{today}-{String(i + 1).padStart(3, "0")}
+                      </span>
+                      <span className="text-slate-400 text-xs">{n} images</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ) : (
+              <div className="rounded-lg border border-dashed border-slate-700 bg-slate-950 p-3 text-[13px]">
+                <div className="text-slate-400">
+                  📁 Dino IMG / <span className="font-mono font-bold text-green-400">{folderPreview}</span>
+                </div>
+                <div className="text-slate-400 text-xs mt-1.5">
+                  Will create a new folder &amp; upload <b className="text-slate-200">{selectedItems.length}</b> images here{" "}
+                  <span className="opacity-60">(batch number auto-increments)</span>
+                </div>
+              </div>
+            )}
+
+            {syncError && <p className="text-xs text-red-400 mt-3">{syncError}</p>}
+
+            {syncing && syncProgress && (
+              <div className="mt-4">
+                <div className="h-1.5 w-full rounded-full bg-slate-800 overflow-hidden">
+                  <div
+                    className="h-full bg-blue-500 transition-all duration-200"
+                    style={{ width: `${syncProgress.total ? (syncProgress.done / syncProgress.total) * 100 : 0}%` }}
+                  />
+                </div>
+                <p className="text-xs text-slate-400 mt-1.5">
+                  Uploading {syncProgress.done}/{syncProgress.total}...
+                </p>
+              </div>
+            )}
+
+            <div className="flex justify-end gap-2.5 mt-5">
+              <button
+                onClick={() => setSyncOpen(false)}
+                disabled={syncing}
+                className="px-4 py-2 rounded-lg text-sm font-medium bg-slate-800 border border-slate-700 text-slate-200 hover:bg-slate-700 transition-colors cursor-pointer disabled:opacity-40"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={doSync}
+                disabled={syncing || !product.trim()}
+                className="px-4 py-2 rounded-lg text-sm font-semibold bg-blue-600 text-white hover:bg-blue-500 transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                {syncing
+                  ? syncProgress
+                    ? `Uploading ${syncProgress.done}/${syncProgress.total}...`
+                    : "Uploading..."
+                  : "Upload to Drive →"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {syncResult && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-[60] flex items-center gap-4 rounded-xl border border-green-500 bg-slate-800 px-5 py-3.5 shadow-2xl">
+          <span className="text-green-400 font-semibold text-sm">
+            ✓ Uploaded {syncResult.count} images
+            {syncResult.failed.length > 0 ? ` (${syncResult.failed.length} failed)` : ""}
+            {syncResult.folders.length > 1
+              ? ` to ${syncResult.folders.length} folders`
+              : ` → ${syncResult.folders[0]?.folderName ?? ""}`}
+          </span>
+          <div className="flex items-center gap-3">
+            {syncResult.folders.map(
+              (f, i) =>
+                f.webViewLink && (
+                  <a
+                    key={i}
+                    href={f.webViewLink}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-blue-400 font-semibold text-sm hover:underline whitespace-nowrap"
+                  >
+                    {syncResult.folders.length > 1 ? `Folder ${i + 1} ↗` : "Open folder ↗"}
+                  </a>
+                )
+            )}
+          </div>
+          <button onClick={() => setSyncResult(null)} className="text-slate-400 hover:text-slate-200 cursor-pointer">
+            ✕
+          </button>
+        </div>
+      )}
     </div>
   );
 }
