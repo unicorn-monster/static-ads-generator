@@ -18,17 +18,31 @@ export function slugProduct(name: string): string {
     .replace(/[^a-z0-9]+/g, "");
 }
 
-/** Build an authenticated Drive client from token.json. Throws Error("NOT_AUTHORIZED") if it's missing. */
+/**
+ * Build an authenticated Drive client.
+ * Prefers OAuth creds from env vars (works on serverless, e.g. Vercel), and falls back to
+ * token.json on disk for local dev. Throws Error("NOT_AUTHORIZED") if neither is available.
+ */
 export async function getDrive(): Promise<drive_v3.Drive> {
-  let raw: string;
-  try {
-    raw = await readFile(TOKEN_PATH, "utf-8");
-  } catch {
-    throw new Error("NOT_AUTHORIZED");
+  let client_id = process.env.GOOGLE_OAUTH_CLIENT_ID;
+  let client_secret = process.env.GOOGLE_OAUTH_CLIENT_SECRET;
+  let refresh_token = process.env.GOOGLE_OAUTH_REFRESH_TOKEN;
+
+  if (!client_id || !client_secret || !refresh_token) {
+    // Local dev fallback: token.json (gitignored, absent on serverless).
+    try {
+      const raw = await readFile(TOKEN_PATH, "utf-8");
+      const creds = JSON.parse(raw) as { client_id: string; client_secret: string; refresh_token: string };
+      client_id = creds.client_id;
+      client_secret = creds.client_secret;
+      refresh_token = creds.refresh_token;
+    } catch {
+      throw new Error("NOT_AUTHORIZED");
+    }
   }
-  const creds = JSON.parse(raw) as { client_id: string; client_secret: string; refresh_token: string };
-  const auth = new google.auth.OAuth2(creds.client_id, creds.client_secret);
-  auth.setCredentials({ refresh_token: creds.refresh_token });
+
+  const auth = new google.auth.OAuth2(client_id, client_secret);
+  auth.setCredentials({ refresh_token });
   return google.drive({ version: "v3", auth });
 }
 
