@@ -82,7 +82,7 @@ export function UploadDropzone({
             </svg>
             <p className="text-xs">Click to upload or drag and drop</p>
             <p className="text-[10px] mt-0.5 text-slate-600">
-              JPEG, PNG, WEBP &middot; Max 30MB &middot; Up to {maxImages} files
+              JPEG, PNG, WEBP &middot; Max 4MB/ảnh &middot; Up to {maxImages} files
             </p>
           </div>
         ) : (

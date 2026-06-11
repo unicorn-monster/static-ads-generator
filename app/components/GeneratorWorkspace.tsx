@@ -54,6 +54,7 @@ export function GeneratorWorkspace({
   const [settings, setSettings] = useState<SettingsValues>(() => defaultSettings(getModel(defaultModelId)!));
   const [images, setImages] = useState<UploadedImage[]>([]);
   const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
 
   const [tab, setTab] = useState<"recent" | "gallery">("recent");
   const [preview, setPreview] = useState<{ url: string; kind: Modality } | null>(null);
@@ -143,18 +144,30 @@ export function GeneratorWorkspace({
     const toUpload = Array.from(files).slice(0, remaining);
     if (toUpload.length === 0) return;
     setUploading(true);
-    try {
-      const fd = new FormData();
-      toUpload.forEach((f) => fd.append("files", f));
-      const res = await fetch("/api/upload", { method: "POST", body: fd });
-      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail ?? "Upload failed");
-      const data: UploadedImage[] = await res.json();
-      setImages((prev) => [...prev, ...data]);
-    } catch (e) {
-      console.error("Upload failed:", e instanceof Error ? e.message : e);
-    } finally {
-      setUploading(false);
+    setUploadError(null);
+    // Upload each file in its own request: Vercel serverless caps a request body at 4.5MB,
+    // so batching every file into one POST fails once their combined size crosses that limit.
+    const settled = await Promise.allSettled(
+      toUpload.map(async (f) => {
+        const fd = new FormData();
+        fd.append("files", f);
+        const res = await fetch("/api/upload", { method: "POST", body: fd });
+        if (!res.ok) {
+          const detail = (await res.json().catch(() => ({}))).detail;
+          throw new Error(detail ?? (res.status === 413 ? "File quá lớn (>4MB)" : `Upload failed (${res.status})`));
+        }
+        const [uploaded] = (await res.json()) as UploadedImage[];
+        return uploaded;
+      })
+    );
+    const uploaded = settled.flatMap((r) => (r.status === "fulfilled" ? [r.value] : []));
+    if (uploaded.length > 0) setImages((prev) => [...prev, ...uploaded]);
+    const firstError = settled.find((r) => r.status === "rejected") as PromiseRejectedResult | undefined;
+    if (firstError) {
+      const reason = firstError.reason instanceof Error ? firstError.reason.message : "Upload failed";
+      setUploadError(`${settled.length - uploaded.length}/${toUpload.length} ảnh lỗi: ${reason}`);
     }
+    setUploading(false);
   };
 
   const prompts = useMemo(
@@ -349,9 +362,13 @@ export function GeneratorWorkspace({
               uploading={uploading}
               onFiles={handleFiles}
               onRemove={(filename) => setImages((prev) => prev.filter((i) => i.filename !== filename))}
-              onClear={() => setImages([])}
+              onClear={() => {
+                setImages([]);
+                setUploadError(null);
+              }}
             />
           )}
+          {uploadError && <p className="text-xs text-red-400 -mt-1">{uploadError}</p>}
 
           {modality === "video" ? (
             <VideoSettings
