@@ -1,5 +1,17 @@
 import type { ModelSpec } from "./types";
 
+// Per-request guard for /api/create-tasks. The client now creates tasks one at a
+// time through the generation pool, so this mainly protects the endpoint itself.
+export const MAX_BULK_PROMPTS = 20;
+
+// Generation pool: how many tasks run at once. Kie.ai allows 100+ concurrent
+// RUNNING tasks; the real limit is 20 new creations / 10s, so a burst of 20 at
+// the start sits right at that line and is paced by completions afterward.
+export const GEN_CONCURRENCY = 20;
+
+// Soft cap on prompts per generate (CSV upload or typed) — a credit safety net.
+export const MAX_TOTAL_PROMPTS = 100;
+
 // ---------------------------------------------------------------------------
 // Shared option lists (mirrors current app/page.tsx values — do not change)
 // ---------------------------------------------------------------------------
@@ -45,6 +57,29 @@ export const MODELS: ModelSpec[] = [
     buildInput: ({ prompt, imageUrls, aspectRatio, resolution }) => ({
       prompt,
       input_urls: imageUrls,
+      aspect_ratio: aspectRatio,
+      resolution: gptResolution(resolution, aspectRatio),
+      nsfw_checker: false,
+    }),
+  },
+  {
+    id: "gpt-image-2-text-to-image",
+    label: "GPT Image-2 (Text) — 800đ", // 1K base: $0.03 × 26,300đ (rounded up)
+    modality: "image",
+    feature: "Create Image",
+    imageInput: "none", // text-to-image only — no reference image
+    maxImages: 0,
+    aspectRatios: GPT_ASPECT_RATIOS,
+    resolutions: IMG_RESOLUTIONS,
+    maxPromptChars: 20000, // Kie schema: prompt max 20,000 chars
+    // Same Kie constraints as the i2i variant: aspect "auto" -> only 1K; aspect "1:1" -> no 4K.
+    defaults: { aspectRatio: "1:1", resolution: "1K" },
+    resolveModelId: () => "gpt-image-2-text-to-image",
+    // Confirmed from playground Run button: 1K = 6 cr ($0.03), 2K = 10 ($0.05), 4K = 16 ($0.08).
+    priceCredits: ({ resolution, aspectRatio, count }) =>
+      (({ "1K": 6, "2K": 10, "4K": 16 } as Record<string, number>)[gptResolution(resolution, aspectRatio ?? "1:1")] ?? 6) * count,
+    buildInput: ({ prompt, aspectRatio, resolution }) => ({
+      prompt,
       aspect_ratio: aspectRatio,
       resolution: gptResolution(resolution, aspectRatio),
       nsfw_checker: false,
