@@ -11,3 +11,4 @@ input/
 node_modules/
 .next/
 *.pack.gz
+*.tsbuildinfo
