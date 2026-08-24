@@ -16,6 +16,10 @@ export function UploadDropzone({
   onFiles,
   onRemove,
   onClear,
+  labelFor,
+  title,
+  hint,
+  disabled,
 }: {
   images: UploadedImage[];
   maxImages: number;
@@ -24,16 +28,23 @@ export function UploadDropzone({
   onFiles: (files: FileList | File[]) => void;
   onRemove: (filename: string) => void;
   onClear: () => void;
+  /** Optional per-slot badge, e.g. "@Image1" for Seedance reference images. */
+  labelFor?: (index: number) => string | null;
+  /** Section heading; defaults to the generic "Image Input". */
+  title?: string;
+  hint?: string;
+  /** Frame images are in use — Kie rejects frames + reference images together. */
+  disabled?: boolean;
 }) {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [dragOver, setDragOver] = useState(false);
 
   return (
-    <div>
+    <div className={disabled ? "opacity-40 pointer-events-none" : undefined}>
       <div className="flex items-center gap-2 mb-1.5">
-        <label className="block text-sm font-medium text-slate-200">
-          Image Input
-          <span className="text-xs text-slate-500 font-normal ml-1">
+        <label className={`block text-sm text-slate-200 ${title ? "font-semibold font-mono" : "font-medium"}`}>
+          {title ?? "Image Input"}
+          <span className="text-xs text-slate-500 font-normal font-sans ml-1">
             {imageInput === "required" ? `(required, 1–${maxImages})` : `(optional, up to ${maxImages})`}
           </span>
         </label>
@@ -66,7 +77,7 @@ export function UploadDropzone({
         <input
           ref={fileInputRef}
           type="file"
-          accept="image/jpeg,image/png,image/webp"
+          accept="image/jpeg,image/png,image/webp,image/gif,image/bmp"
           multiple
           className="hidden"
           onChange={(e) => {
@@ -82,14 +93,20 @@ export function UploadDropzone({
             </svg>
             <p className="text-xs">Click to upload or drag and drop</p>
             <p className="text-[10px] mt-0.5 text-slate-600">
-              JPEG, PNG, WEBP &middot; Max 4MB/ảnh &middot; Up to {maxImages} files
+              JPEG, PNG, WEBP, JPG, GIF, BMP &middot; Max 30MB/ảnh &middot; Up to {maxImages} file
+              {maxImages > 1 ? "s" : ""}
             </p>
           </div>
         ) : (
           <div className="grid grid-cols-4 gap-2">
-            {images.map((img) => (
+            {images.map((img, i) => (
               <div key={img.filename} className="relative group rounded-lg overflow-hidden aspect-square bg-slate-800">
                 <img src={img.url} alt="Reference" className="w-full h-full object-cover" />
+                {labelFor?.(i) && (
+                  <span className="absolute bottom-0 inset-x-0 bg-black/70 text-[9px] text-slate-200 text-center py-0.5 font-mono">
+                    {labelFor(i)}
+                  </span>
+                )}
                 <button
                   onClick={(e) => {
                     e.stopPropagation();
@@ -120,7 +137,7 @@ export function UploadDropzone({
           </div>
         )}
       </div>
-      <p className="text-[10px] text-slate-500 mt-1">Input images to transform or use as reference</p>
+      <p className="text-[10px] text-slate-500 mt-1">{hint ?? "Input images to transform or use as reference"}</p>
     </div>
   );
 }

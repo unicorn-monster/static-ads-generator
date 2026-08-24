@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getModel } from "@/lib/models";
+import { getModel, MAX_BULK_PROMPTS } from "@/lib/models";
 import { createKieTask } from "@/lib/kie";
 
 export const maxDuration = 60;
@@ -21,6 +21,11 @@ export async function POST(req: Request) {
     mode,
     generateAudio,
     nsfwChecker,
+    webSearch,
+    firstFrameUrl,
+    lastFrameUrl,
+    videoUrls,
+    audioUrls,
   } = await req.json();
 
   const spec = getModel(modelId);
@@ -32,15 +37,15 @@ export async function POST(req: Request) {
     return NextResponse.json({ detail: "prompts must be a non-empty array" }, { status: 400 });
   }
 
-  // Bulk: image up to 20, video single (cost/latency).
-  const maxPrompts = spec.modality === "video" ? 1 : 20;
+  // Bulk: image up to MAX_BULK_PROMPTS, video single (cost/latency).
+  const maxPrompts = spec.modality === "video" ? 1 : MAX_BULK_PROMPTS;
   if (prompts.length > maxPrompts) {
     return NextResponse.json(
       {
         detail:
           spec.modality === "video"
             ? "Video supports 1 prompt at a time"
-            : "Maximum 20 prompts at a time",
+            : `Maximum ${MAX_BULK_PROMPTS} prompts at a time`,
       },
       { status: 400 }
     );
@@ -76,6 +81,11 @@ export async function POST(req: Request) {
           mode,
           generateAudio,
           nsfwChecker,
+          webSearch,
+          firstFrameUrl,
+          lastFrameUrl,
+          videoUrls: Array.isArray(videoUrls) ? videoUrls.slice(0, spec.extras?.refVideos ?? 0) : undefined,
+          audioUrls: Array.isArray(audioUrls) ? audioUrls.slice(0, spec.extras?.refAudios ?? 0) : undefined,
         });
         const kieTaskId = await createKieTask(apiKey, kieModelId, input);
         return { index, prompt, kieTaskId };

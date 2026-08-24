@@ -16,6 +16,11 @@ export interface BuildOpts {
   mode?: string; // grok: fun/normal/spicy
   generateAudio?: boolean; // seedance
   nsfwChecker?: boolean; // video: content filtering toggle
+  firstFrameUrl?: string; // seedance: first_frame_url
+  lastFrameUrl?: string; // seedance: last_frame_url
+  videoUrls?: string[]; // seedance: reference_video_urls
+  audioUrls?: string[]; // seedance: reference_audio_urls
+  webSearch?: boolean; // seedance: web_search
 }
 
 /**
@@ -37,7 +42,19 @@ export interface ModelSpec {
   maxPromptChars?: number; // hard cap on prompt length (per Kie schema)
   notes?: Record<string, string>; // per-field helper text (Kie-style), keyed by field name
   defaults?: { aspectRatio?: string; resolution?: string; mode?: string };
-  extras?: { audio?: boolean; modes?: string[] };
+  extras?: {
+    audio?: boolean;
+    modes?: string[];
+    frames?: boolean; // show the first_frame_url + last_frame_url pair
+    refVideos?: number; // max reference video files (0/undefined = no slot)
+    refAudios?: number; // max reference audio files
+    webSearch?: boolean; // show the web_search toggle
+  };
+  /**
+   * Order of the setting controls, mirroring the model's Kie playground form.
+   * Names are Kie field names; unknown/omitted names simply aren't rendered.
+   */
+  fieldOrder?: string[];
   /** Map a Model (+ whether a reference image is present) to the upstream Kie model ID. */
   resolveModelId: (hasImage: boolean) => string;
   /** Build the Kie `input` body for this model. */
@@ -53,6 +70,7 @@ export interface PriceOpts {
   duration?: number; // video seconds
   count: number; // number of outputs (images); video is always 1
   generateAudio?: boolean;
+  hasRefVideo?: boolean; // Kie bills video-input jobs as Price × (Input + Output) — estimate unknown
 }
 
 /** A generated output (image or video) shown in Recent/Gallery. */

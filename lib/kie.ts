@@ -22,6 +22,11 @@ export async function createKieTask(
     if (!resp.ok) throw new Error(`Kie API error ${resp.status}: ${await resp.text()}`);
 
     const data = await resp.json();
+    // Kie reports rejected input as HTTP 200 with a non-200 `code` and the reason in `msg`
+    // (e.g. 422 "The reference image and the first and last frames are mutually exclusive").
+    if (typeof data.code === "number" && data.code !== 200) {
+      throw new Error(`Kie ${data.code}: ${data.msg ?? "request rejected"}`);
+    }
     const taskId = data.taskId ?? data.data?.taskId;
     if (!taskId) throw new Error("No taskId in Kie API response");
     return taskId as string;

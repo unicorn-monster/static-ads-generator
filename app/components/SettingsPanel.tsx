@@ -10,6 +10,7 @@ export interface SettingsValues {
   mode?: string;
   generateAudio?: boolean;
   nsfwChecker?: boolean;
+  webSearch?: boolean;
 }
 
 const selectCls =

@@ -29,7 +29,18 @@ export function loadGallery(key: string): SessionItem[] {
     const stored = localStorage.getItem(key);
     if (!stored) return [];
     const arr = JSON.parse(stored) as LegacyImage[];
-    return Array.isArray(arr) ? arr.map(normalize) : [];
+    if (!Array.isArray(arr)) return [];
+    // Drop duplicate ids: an earlier polling race (see FIX #8) could persist the same item twice,
+    // which crashes React with a duplicate-key error on the Gallery tab. Keep the first occurrence.
+    const seen = new Set<string>();
+    const out: SessionItem[] = [];
+    for (const raw of arr) {
+      const item = normalize(raw);
+      if (seen.has(item.id)) continue;
+      seen.add(item.id);
+      out.push(item);
+    }
+    return out;
   } catch {
     return [];
   }

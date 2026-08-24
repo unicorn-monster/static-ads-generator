@@ -2,13 +2,16 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import JSZip from "jszip";
-import { getModel } from "@/lib/models";
+import { getModel, MAX_TOTAL_PROMPTS } from "@/lib/models";
 import { creditsToVnd, formatVnd } from "@/lib/pricing";
 import type { Modality, ModelSpec, SessionItem } from "@/lib/types";
 import { useGallery } from "@/app/hooks/useGallery";
 import { useGeneration } from "@/app/hooks/useGeneration";
 import { PromptPanel } from "./PromptPanel";
 import { UploadDropzone, type UploadedImage } from "./UploadDropzone";
+import { RefMediaPanel, type RefSlot } from "./RefMediaPanel";
+import { FramesPanel, type FrameSlot } from "./FramesPanel";
+import { uploadFile } from "@/lib/upload";
 import { SettingsPanel, type SettingsValues } from "./SettingsPanel";
 import { VideoSettings } from "./VideoSettings";
 import { ResultCard } from "./ResultCard";
@@ -29,6 +32,7 @@ function defaultSettings(m: ModelSpec): SettingsValues {
     mode: m.extras?.modes ? m.defaults?.mode ?? m.extras.modes[0] : undefined,
     generateAudio: m.extras?.audio ? true : undefined,
     nsfwChecker: m.exposeNsfw ? false : undefined,
+    webSearch: m.extras?.webSearch ? false : undefined,
   };
 }
 
@@ -56,6 +60,14 @@ export function GeneratorWorkspace({
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
 
+  // Seedance-only extra inputs (frame pair, reference video/audio clips).
+  const [firstFrame, setFirstFrame] = useState<UploadedImage | null>(null);
+  const [lastFrame, setLastFrame] = useState<UploadedImage | null>(null);
+  const [frameBusy, setFrameBusy] = useState<FrameSlot | null>(null);
+  const [refVideos, setRefVideos] = useState<UploadedImage[]>([]);
+  const [refAudios, setRefAudios] = useState<UploadedImage[]>([]);
+  const [refBusy, setRefBusy] = useState<RefSlot | null>(null);
+
   const [tab, setTab] = useState<"recent" | "gallery">("recent");
   const [preview, setPreview] = useState<{ url: string; kind: Modality } | null>(null);
   const [newestId, setNewestId] = useState<string | null>(null);
@@ -76,7 +88,7 @@ export function GeneratorWorkspace({
   >(null);
 
   const gallery = useGallery(storageKey);
-  const { tasks, generate, dismiss } = useGeneration(
+  const { tasks, progress, generate, dismiss } = useGeneration(
     useCallback(
       (item: SessionItem) => {
         gallery.add(item);
@@ -137,6 +149,12 @@ export function GeneratorWorkspace({
       };
     });
     setImages((imgs) => imgs.slice(0, next.maxImages));
+    if (!next.extras?.frames) {
+      setFirstFrame(null);
+      setLastFrame(null);
+    }
+    if (!next.extras?.refVideos) setRefVideos([]);
+    if (!next.extras?.refAudios) setRefAudios([]);
   };
 
   const handleFiles = async (files: FileList | File[]) => {
@@ -145,21 +163,7 @@ export function GeneratorWorkspace({
     if (toUpload.length === 0) return;
     setUploading(true);
     setUploadError(null);
-    // Upload each file in its own request: Vercel serverless caps a request body at 4.5MB,
-    // so batching every file into one POST fails once their combined size crosses that limit.
-    const settled = await Promise.allSettled(
-      toUpload.map(async (f) => {
-        const fd = new FormData();
-        fd.append("files", f);
-        const res = await fetch("/api/upload", { method: "POST", body: fd });
-        if (!res.ok) {
-          const detail = (await res.json().catch(() => ({}))).detail;
-          throw new Error(detail ?? (res.status === 413 ? "File quá lớn (>4MB)" : `Upload failed (${res.status})`));
-        }
-        const [uploaded] = (await res.json()) as UploadedImage[];
-        return uploaded;
-      })
-    );
+    const settled = await Promise.allSettled(toUpload.map((f) => uploadFile(f, "image")));
     const uploaded = settled.flatMap((r) => (r.status === "fulfilled" ? [r.value] : []));
     if (uploaded.length > 0) setImages((prev) => [...prev, ...uploaded]);
     const firstError = settled.find((r) => r.status === "rejected") as PromiseRejectedResult | undefined;
@@ -170,12 +174,60 @@ export function GeneratorWorkspace({
     setUploading(false);
   };
 
-  const prompts = useMemo(
+  const handleFramePick = async (slot: FrameSlot, file: File) => {
+    setFrameBusy(slot);
+    setUploadError(null);
+    try {
+      const uploaded = await uploadFile(file, "image");
+      (slot === "first" ? setFirstFrame : setLastFrame)(uploaded);
+    } catch (e) {
+      setUploadError(e instanceof Error ? e.message : "Upload failed");
+    } finally {
+      setFrameBusy(null);
+    }
+  };
+
+  const handleRefPick = async (slot: RefSlot, files: File[]) => {
+    if (files.length === 0) return;
+    setRefBusy(slot);
+    setUploadError(null);
+    try {
+      const isVideo = slot === "video";
+      const max = (isVideo ? model.extras?.refVideos : model.extras?.refAudios) ?? 0;
+      const current = isVideo ? refVideos : refAudios;
+      const picked = files.slice(0, max - current.length);
+      const uploaded = await Promise.all(picked.map((f) => uploadFile(f, isVideo ? "video" : "audio")));
+      (isVideo ? setRefVideos : setRefAudios)((prev) => [...prev, ...uploaded]);
+    } catch (e) {
+      setUploadError(e instanceof Error ? e.message : "Upload failed");
+    } finally {
+      setRefBusy(null);
+    }
+  };
+
+  const handleRefRemove = (slot: RefSlot, filename: string) => {
+    if (slot === "video") setRefVideos((p) => p.filter((f) => f.filename !== filename));
+    else setRefAudios((p) => p.filter((f) => f.filename !== filename));
+  };
+
+  const allPrompts = useMemo(
     () => (bulk ? parseBulkPrompts(promptText) : promptText.trim() ? [promptText.trim()] : []),
     [promptText, bulk]
   );
+  // Soft-cap a batch at MAX_TOTAL_PROMPTS; over that we run the first N and warn.
+  const overCap = allPrompts.length > MAX_TOTAL_PROMPTS;
+  const prompts = overCap ? allPrompts.slice(0, MAX_TOTAL_PROMPTS) : allPrompts;
   const missingImages = model.imageInput === "required" && images.length === 0;
-  const activeCount = tasks.filter((t) => t.stage !== "error").length;
+  const queuedCount = tasks.filter((t) => t.stage === "queued").length;
+  const generatingCount = tasks.filter((t) => t.stage === "generating").length;
+  const activeCount = queuedCount + generatingCount;
+  const statusText = [
+    generatingCount > 0 ? `${generatingCount} đang chạy` : null,
+    queuedCount > 0 ? `${queuedCount} chờ` : null,
+    progress ? `${progress.done}/${progress.total} xong` : null,
+  ]
+    .filter(Boolean)
+    .join(" · ");
 
   const handleGenerate = () => {
     if (prompts.length === 0 || missingImages) return;
@@ -190,6 +242,11 @@ export function GeneratorWorkspace({
       mode: settings.mode,
       generateAudio: settings.generateAudio,
       nsfwChecker: settings.nsfwChecker,
+      webSearch: settings.webSearch,
+      firstFrameUrl: firstFrame?.url,
+      lastFrameUrl: lastFrame?.url,
+      videoUrls: refVideos.map((f) => f.url),
+      audioUrls: refAudios.map((f) => f.url),
     });
   };
 
@@ -241,6 +298,7 @@ export function GeneratorWorkspace({
     duration: settings.duration,
     count: Math.max(prompts.length, 1),
     generateAudio: settings.generateAudio,
+    hasRefVideo: refVideos.length > 0,
   });
   const priceVnd = priceCredits != null ? creditsToVnd(priceCredits) : null;
 
@@ -346,6 +404,43 @@ export function GeneratorWorkspace({
     <div className="flex h-full overflow-hidden">
       <aside className="w-[35%] min-w-[340px] max-w-[480px] border-r border-slate-700 bg-slate-900 flex flex-col">
         <div className="flex-1 overflow-y-auto p-6 space-y-6">
+          {/* Model picker is ours, not Kie's (Kie gives each model its own page), so it
+              leads: switching models resets the inputs below it. */}
+          {modality === "video" && (
+            <div>
+              <label className="block text-xs text-slate-400 mb-1">Model</label>
+              <select
+                value={model.id}
+                onChange={(e) => onModelChange(e.target.value)}
+                className="w-full rounded-lg border border-slate-700 bg-slate-800 px-2 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-slate-600 transition cursor-pointer"
+              >
+                {models.map((m) => (
+                  <option key={m.id} value={m.id}>
+                    {m.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          {/* From here down the panel follows the model's Kie playground form order. */}
+          {model.extras?.frames && (
+            <>
+              <FramesPanel
+                firstFrame={firstFrame}
+                lastFrame={lastFrame}
+                busy={frameBusy}
+                disabled={images.length > 0}
+                onPick={handleFramePick}
+                onRemove={(slot) => (slot === "first" ? setFirstFrame(null) : setLastFrame(null))}
+              />
+              <p className="text-[11px] text-amber-400/90 -mt-3">
+                Kie chỉ cho chọn một: <strong>Frames</strong> hoặc <strong>reference_image_urls</strong>. Dùng cái này
+                thì cái kia bị khoá.
+              </p>
+            </>
+          )}
+
           <PromptPanel
             value={promptText}
             onChange={setPromptText}
@@ -366,15 +461,30 @@ export function GeneratorWorkspace({
                 setImages([]);
                 setUploadError(null);
               }}
+              disabled={!!model.extras?.frames && (!!firstFrame || !!lastFrame)}
+              title={model.extras?.frames ? "reference_image_urls" : undefined}
+              // Seedance addresses reference images as @Image1, @Image2, … in the prompt.
+              labelFor={model.extras?.frames ? (i) => `@Image${i + 1}` : undefined}
+              hint={model.extras?.frames ? model.notes?.reference_image_urls : model.notes?.image_urls}
+            />
+          )}
+
+          {(model.extras?.refVideos || model.extras?.refAudios) && (
+            <RefMediaPanel
+              videos={refVideos}
+              audios={refAudios}
+              maxVideos={model.extras?.refVideos ?? 0}
+              maxAudios={model.extras?.refAudios ?? 0}
+              busy={refBusy}
+              onPick={handleRefPick}
+              onRemove={handleRefRemove}
             />
           )}
           {uploadError && <p className="text-xs text-red-400 -mt-1">{uploadError}</p>}
 
           {modality === "video" ? (
             <VideoSettings
-              models={models}
               model={model}
-              onModelChange={onModelChange}
               values={settings}
               onChange={(patch) => setSettings((s) => ({ ...s, ...patch }))}
             />
@@ -406,7 +516,12 @@ export function GeneratorWorkspace({
           {activeCount > 0 && (
             <p className="text-xs text-slate-400 flex items-center gap-1.5">
               <span className="inline-block h-1.5 w-1.5 rounded-full bg-yellow-500 animate-pulse" />
-              {activeCount} {noun.toLowerCase()}{activeCount !== 1 ? "s" : ""} generating...
+              {statusText}
+            </p>
+          )}
+          {overCap && (
+            <p className="text-xs text-amber-400">
+              {allPrompts.length} prompt — tối đa {MAX_TOTAL_PROMPTS}/lần, sẽ chạy {MAX_TOTAL_PROMPTS} đầu.
             </p>
           )}
           {missingImages && (
@@ -497,7 +612,11 @@ export function GeneratorWorkspace({
                   t.stage === "error" ? (
                     <ErrorCard key={t.taskId} onDismiss={() => dismiss(t.taskId)} />
                   ) : (
-                    <ProcessingCard key={t.taskId} label={modality === "video" ? "Rendering..." : "Processing..."} />
+                    <ProcessingCard
+                      key={t.taskId}
+                      queued={t.stage === "queued"}
+                      label={modality === "video" ? "Rendering..." : "Processing..."}
+                    />
                   )
                 )}
                 {gallery.session.map((item) => (

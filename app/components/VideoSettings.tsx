@@ -56,50 +56,35 @@ function Toggle({ checked, onChange }: { checked: boolean; onChange: (v: boolean
   );
 }
 
+// Fallback order — also exactly Grok's image-to-video form order on kie.ai.
+// (Grok's text-to-video form swaps mode and aspect_ratio; not worth branching for.)
+const DEFAULT_ORDER = ["mode", "aspect_ratio", "duration", "resolution", "generate_audio", "nsfw_checker"];
+
 export function VideoSettings({
-  models,
   model,
-  onModelChange,
   values,
   onChange,
 }: {
-  models: ModelSpec[];
   model: ModelSpec;
-  onModelChange: (id: string) => void;
   values: SettingsValues;
   onChange: (patch: Partial<SettingsValues>) => void;
 }) {
   const dur = model.duration ?? { min: 1, max: 10, step: 1, default: 1 };
   const durValue = values.duration ?? dur.default;
 
-  return (
-    <div className="space-y-5">
-      {/* Model selector stays a dropdown (app has multiple models; Kie playground is single-model) */}
-      <div>
-        <label className="block text-xs text-slate-400 mb-1">Model</label>
-        <select
-          value={model.id}
-          onChange={(e) => onModelChange(e.target.value)}
-          className="w-full rounded-lg border border-slate-700 bg-slate-800 px-2 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-slate-600 transition cursor-pointer"
-        >
-          {models.map((m) => (
-            <option key={m.id} value={m.id}>
-              {m.label}
-            </option>
-          ))}
-        </select>
-      </div>
-
-      {model.extras?.modes && (
-        <Field label="mode" note={model.notes?.mode}>
-          <Pills options={model.extras.modes} value={values.mode ?? model.extras.modes[0]} onChange={(v) => onChange({ mode: v })} />
-        </Field>
-      )}
-
+  // Each control keyed by its Kie field name; the model's fieldOrder decides what renders where.
+  const fields: Record<string, React.ReactNode> = {
+    mode: model.extras?.modes && (
+      <Field label="mode" note={model.notes?.mode}>
+        <Pills options={model.extras.modes} value={values.mode ?? model.extras.modes[0]} onChange={(v) => onChange({ mode: v })} />
+      </Field>
+    ),
+    aspect_ratio: (
       <Field label="aspect_ratio" note={model.notes?.aspect_ratio}>
         <Pills options={model.aspectRatios} value={values.aspectRatio} onChange={(v) => onChange({ aspectRatio: v })} />
       </Field>
-
+    ),
+    duration: (
       <Field label="duration" note={model.notes?.duration}>
         <div className="flex items-center gap-3">
           <input
@@ -116,24 +101,36 @@ export function VideoSettings({
           </span>
         </div>
       </Field>
+    ),
+    resolution: model.resolutions && (
+      <Field label="resolution" note={model.notes?.resolution}>
+        <Pills options={model.resolutions} value={values.resolution} onChange={(v) => onChange({ resolution: v })} />
+      </Field>
+    ),
+    generate_audio: model.extras?.audio && (
+      <Field label="generate_audio" note={model.notes?.generate_audio}>
+        <Toggle checked={values.generateAudio ?? true} onChange={(v) => onChange({ generateAudio: v })} />
+      </Field>
+    ),
+    web_search: model.extras?.webSearch && (
+      <Field label="web_search" note={model.notes?.web_search}>
+        <Toggle checked={values.webSearch ?? false} onChange={(v) => onChange({ webSearch: v })} />
+      </Field>
+    ),
+    nsfw_checker: model.exposeNsfw && (
+      <Field label="nsfw_checker" note={model.notes?.nsfw_checker}>
+        <Toggle checked={values.nsfwChecker ?? false} onChange={(v) => onChange({ nsfwChecker: v })} />
+      </Field>
+    ),
+  };
 
-      {model.resolutions && (
-        <Field label="resolution" note={model.notes?.resolution}>
-          <Pills options={model.resolutions} value={values.resolution} onChange={(v) => onChange({ resolution: v })} />
-        </Field>
-      )}
-
-      {model.extras?.audio && (
-        <Field label="generate_audio" note={model.notes?.generate_audio}>
-          <Toggle checked={values.generateAudio ?? true} onChange={(v) => onChange({ generateAudio: v })} />
-        </Field>
-      )}
-
-      {model.exposeNsfw && (
-        <Field label="nsfw_checker" note={model.notes?.nsfw_checker}>
-          <Toggle checked={values.nsfwChecker ?? false} onChange={(v) => onChange({ nsfwChecker: v })} />
-        </Field>
-      )}
+  return (
+    <div className="space-y-5">
+      {(model.fieldOrder ?? DEFAULT_ORDER)
+        .filter((name) => fields[name])
+        .map((name) => (
+          <div key={name}>{fields[name]}</div>
+        ))}
     </div>
   );
 }
