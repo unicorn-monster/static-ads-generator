@@ -8,7 +8,7 @@ export default function VideoPage() {
     <GeneratorWorkspace
       modality="video"
       models={modelsByModality("video")}
-      defaultModelId="grok-imagine"
+      defaultModelId="seedance-2"
       storageKey="sag_video_gallery_v1"
       bulk={false}
     />
