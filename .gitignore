@@ -12,3 +12,7 @@ node_modules/
 .next/
 *.pack.gz
 *.tsbuildinfo
+
+# Local tooling state (regenerated per machine)
+.codegraph/
+.agents/
